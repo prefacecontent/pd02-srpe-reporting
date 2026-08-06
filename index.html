@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PD-02 · Weekly SRPE Sales Reporting — Great Eagle Group</title>
+<style>
+  :root{
+    --font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --bg:#f3f6fa; --surface:#ffffff; --surface-2:#f8fafc;
+    --ink:#172033; --muted:#697386; --line:#dfe5ec;
+    --navy:#102a43; --gold:#b8860b; --blue:#2764d7; --blue-soft:#eaf1ff;
+    --teal:#0f8778; --teal-soft:#e8f7f4;
+    --green:#1d7a4a; --green-soft:#eaf7ef;
+    --amber:#a65c00; --amber-soft:#fff4df;
+    --red:#b33a3a; --red-soft:#fff0f0;
+    --shadow:0 10px 30px rgba(25,42,70,.07);
+    --radius:16px; --radius-sm:10px;
+  }
+  *{box-sizing:border-box}
+  html,body{min-width:0;min-height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-family);font-size:14px;line-height:1.5}
+  button,select,input{font:inherit}
+  button{cursor:pointer}
+  .hidden{display:none!important}
+
+  header{background:linear-gradient(135deg,#102a43,#1d4e79);color:#fff;padding:18px 30px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+  header .logo{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#b8860b,#d9a520);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;color:#102a43}
+  header h1{font-size:16.5px;margin:0;letter-spacing:.2px}
+  header .sub{font-size:12px;opacity:.75;margin-top:2px}
+  header .pill{margin-left:auto;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);padding:6px 14px;border-radius:999px;font-size:12px}
+  header .pill.processing{background:#fff4df;color:#a65c00;border-color:#e9c987}
+  header .pill.complete{background:#eaf7ef;color:#1d7a4a;border-color:#bcdcc6}
+
+  nav{background:var(--surface);border-bottom:1px solid var(--line);padding:0 30px;display:flex;gap:4px;position:sticky;top:0;z-index:20}
+  nav button{background:none;border:none;padding:13px 16px;font-size:13.5px;color:var(--muted);border-bottom:2px solid transparent}
+  nav button.active{color:var(--navy);font-weight:600;border-bottom-color:var(--gold)}
+
+  main{padding:26px 30px;max-width:1180px;margin:0 auto}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;margin-bottom:16px;box-shadow:var(--shadow)}
+  .card h2{margin:0 0 4px;font-size:15px;color:var(--navy)}
+  .card .hint{color:var(--muted);font-size:12.5px;margin-bottom:14px}
+
+  .dropzone{border:2px dashed #b9c6d6;border-radius:var(--radius);padding:34px 20px;text-align:center;color:var(--muted);background:var(--surface-2);transition:.15s}
+  .dropzone.drag{border-color:var(--blue);background:var(--blue-soft)}
+  .dropzone strong{color:var(--navy)}
+  .filelist{margin-top:14px}
+  .filerow{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--radius-sm);margin-bottom:6px;background:var(--surface)}
+  .filerow .ext{font-family:ui-monospace,Menlo,monospace;font-size:11px;background:#eef1f5;border-radius:4px;padding:2px 7px;color:var(--muted)}
+  .filerow .name{flex:1;font-size:13px;word-break:break-all}
+  .filerow .size{color:var(--muted);font-size:11.5px}
+  .filerow button{background:none;border:none;color:var(--red);font-size:16px}
+  .btn{background:var(--navy);color:#fff;border:none;border-radius:10px;padding:10px 22px;font-size:13.5px;font-weight:600}
+  .btn:hover{background:#1d4e79}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn.ghost{background:var(--surface);color:var(--navy);border:1px solid var(--line)}
+  .resumecard{background:var(--blue-soft);border:1px solid #c6d8f7;border-radius:var(--radius);padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .resumecard .bid{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--blue)}
+
+  .progressbar{height:10px;background:#e6ecf3;border-radius:999px;overflow:hidden;margin:10px 0 6px}
+  .progressbar .fill{height:100%;background:linear-gradient(90deg,#2764d7,#0f8778);border-radius:999px;transition:width .6s}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+  .chip{border:1px solid var(--line);border-radius:999px;padding:5px 12px;font-size:12px;background:var(--surface);display:flex;align-items:center;gap:7px;max-width:100%}
+  .chip .fn{font-family:ui-monospace,Menlo,monospace;font-size:11px;max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tag{font-size:10px;font-weight:700;letter-spacing:.4px;padding:2px 8px;border-radius:999px;text-transform:uppercase}
+  .tag.ok{background:var(--green-soft);color:var(--green)}
+  .tag.review{background:var(--amber-soft);color:var(--amber)}
+  .tag.pl{background:var(--blue-soft);color:var(--blue)}
+  .tag.sa{background:var(--teal-soft);color:var(--teal)}
+  .tag.rt{background:#f1ecff;color:#6b4fb3}
+  .tag.none{background:#eef1f5;color:var(--muted)}
+
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+  .kpi{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow)}
+  .kpi .l{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+  .kpi .v{font-size:23px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums}
+  .kpi .v small{font-size:12px;color:var(--muted);font-weight:500}
+
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+  .toolbar select,.toolbar input{border:1px solid var(--line);border-radius:9px;padding:7px 12px;background:var(--surface);font-size:13px}
+  .tblwrap{overflow:auto;max-height:520px;border:1px solid var(--line);border-radius:12px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:760px}
+  th{background:#eef2f7;text-align:left;padding:8px 10px;font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);position:sticky;top:0;z-index:1}
+  td{padding:7px 10px;border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
+  td.num{text-align:right}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}
+  .badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.4px}
+  .badge.sold{background:var(--green-soft);color:var(--green)}
+  .badge.offered{background:var(--blue-soft);color:var(--blue)}
+  .badge.selling{background:var(--teal-soft);color:var(--teal)}
+  .badge.term{background:var(--red-soft);color:var(--red)}
+  .badge.dup{background:#f1ecff;color:#6b4fb3}
+  .reviewcard{border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:10px;background:#fffdf8}
+  .reviewcard .head{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:6px}
+  .reviewcard .head .fn{font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:600}
+  .reviewcard .body{font-size:12.5px;color:#4a5468}
+  .reviewcard .body div{margin:2px 0}
+
+  .frame{width:100%;height:calc(100vh - 210px);min-height:600px;border:1px solid var(--line);border-radius:12px;background:#fff}
+  .spinner{display:inline-block;width:13px;height:13px;border:2px solid #c9d4e2;border-top-color:var(--navy);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px;margin-right:6px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .err{color:var(--red)}
+  footer{color:var(--muted);font-size:11.5px;padding:0 30px 34px;max-width:1180px;margin:0 auto}
+  .endpoint{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--muted);background:#eef2f7;border:1px solid var(--line);padding:6px 11px;border-radius:999px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:44vw}
+  @media(max-width:640px){main{padding:16px}header{padding:14px 18px}nav{padding:0 10px}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">GE</div>
+  <div>
+    <h1>PD-02 · Weekly New Residential Sales Reporting 每周新盤成交報告</h1>
+    <div class="sub">SRPE 一手住宅物業銷售資訊網 pipeline · classify → extract → reconcile → Monday-morning report</div>
+  </div>
+  <div class="pill" id="pill">Not started</div>
+</header>
+
+<nav>
+  <button data-view="upload" class="active">Upload</button>
+  <button data-view="status">Processing</button>
+  <button data-view="report">Weekly Report</button>
+  <button data-view="units">Unit Records</button>
+</nav>
+
+<main>
+  <!-- ===================== UPLOAD ===================== -->
+  <section id="view-upload">
+    <div id="resumeCard" class="resumecard hidden">
+      <div>⏮ <strong>Resume previous batch</strong> — the AI results are still on the server.</div>
+      <span class="bid" id="resumeBatchId"></span>
+      <button class="btn ghost" id="resumeBtn">Resume</button>
+      <button class="btn ghost" id="clearResumeBtn">Start fresh</button>
+    </div>
+    <div class="card">
+      <h2>Upload this week's SRPE documents</h2>
+      <div class="hint">Same as every Friday: price lists, sales arrangements and transaction registers — one drop. The pipeline classifies each PDF, extracts unit-level records and reconciles them into one report.</div>
+      <div class="dropzone" id="dropzone">
+        <strong>Drop the week's PDFs here</strong> or click to browse<br>
+        <span style="font-size:12px">7 files in <span class="mono">04_Mock_Data/PD-02_Weekly_Batch/</span> · PDF only in the demo</span>
+      </div>
+      <div class="filelist" id="fileList"></div>
+      <input type="file" id="fileInput" multiple accept=".pdf,.PDF" class="hidden">
+      <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button class="btn" id="uploadBtn">Upload and process</button>
+        <span id="uploadStatus"></span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>What the pipeline does</h2>
+      <div style="font-size:13px;color:#4a5468;line-height:1.7">
+        ① <b>Classify</b> — each document is identified as 價單 Price List / 銷售安排 Sales Arrangement / 成交紀錄冊 Register of Transactions.<br>
+        ② <b>Extract</b> — a type-specific extractor reads unit-level records into one unified schema.<br>
+        ③ <b>Reconcile</b> — the funnel rule (sold &gt; selling &gt; offered) joins units across documents; duplicates are not double-counted.<br>
+        ④ <b>Report</b> — deterministic arithmetic builds the Monday-morning report. No human touched a spreadsheet.
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== STATUS ===================== -->
+  <section id="view-status" class="hidden">
+    <div class="card">
+      <h2 id="statusTitle">AI is reading the documents…</h2>
+      <div class="hint">Batch <span class="mono" id="batchIdLabel"></span> · each file: read → classify → extract → reconcile</div>
+      <div class="progressbar"><div class="fill" id="progressFill" style="width:0%"></div></div>
+      <div style="font-size:12.5px;color:var(--muted)" id="statusText">Waiting…</div>
+      <div class="chips" id="statusChips"></div>
+    </div>
+    <div class="kpis" id="statusKpis" style="display:none"></div>
+  </section>
+
+  <!-- ===================== REPORT ===================== -->
+  <section id="view-report" class="hidden">
+    <div class="card" style="padding:14px 18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <h2 style="margin:0;font-size:14px">Monday-morning report — generated by the pipeline, no manual edits</h2>
+      <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+        <button class="btn ghost" id="downloadReportBtn">Save HTML</button>
+      </div>
+    </div>
+    <iframe class="frame" id="reportFrame" title="Weekly report"></iframe>
+  </section>
+
+  <!-- ===================== UNIT RECORDS ===================== -->
+  <section id="view-units" class="hidden">
+    <div class="kpis" id="unitsKpis"></div>
+    <div class="card">
+      <h2>Unit records — one row per unit, current status</h2>
+      <div class="hint">The same table feeds the research team's analysis (REA-02): one pipeline, two use cases.</div>
+      <div class="toolbar">
+        <select id="devFilter"><option value="">All developments</option><option value="HARBOUR1">Harbour Vista 凱港峰</option><option value="PEAK2">The Peakford 珀峰</option></select>
+        <select id="statusFilter"><option value="">All statuses</option><option value="sold">Sold</option><option value="terminated">Terminated</option><option value="selling">Selling</option><option value="offered">Offered</option></select>
+        <input type="text" id="unitSearch" placeholder="Search unit e.g. T1-5F-A…" style="min-width:180px">
+        <span id="unitCount" style="margin-left:auto;color:var(--muted);font-size:12px"></span>
+      </div>
+      <div class="tblwrap"><table>
+        <thead><tr><th>Development</th><th>Unit</th><th class="num">Area</th><th class="num">List price</th><th>Sale date</th><th class="num">Txn price</th><th class="num">$/sq ft</th><th>Txn date</th><th>Purchaser</th><th>Status</th></tr></thead>
+        <tbody id="unitsBody"></tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <h2>Review queue — needs human eyes</h2>
+      <div class="hint">Unmatched developments, unreadable scans and duplicates land here — the pipeline never breaks, it queues.</div>
+      <div id="reviewQueue"></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  Demo console for PD-02 · backend: n8n webhook endpoints <span class="endpoint" id="endpointLabel"></span> ·
+  spec: <span class="mono">01_Docs/PD-02 Weekly SRPE Sales Reporting — FDE Demo Design Spec.md</span>
+</footer>
+
+<script src="config.js"></script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const BASE = N8N_WEBHOOK_BASE;
+const LS_KEY = "pd02_last_batch";
+const state = { files: [], batchId: null, pollStart: 0, polling: null, reportHtml: null, unitsData: null };
+
+async function api(path, opts){
+  const res = await fetch(BASE + path, opts);
+  if (!res.ok){
+    let msg = "HTTP " + res.status;
+    try { const j = await res.json(); if (j.error) msg = j.error; } catch(e){}
+    throw new Error(msg);
+  }
+  const ct = res.headers.get("content-type") || "";
+  return ct.includes("text/html") ? res.text() : res.json();
+}
+function makeBatchId(){ return "pd02-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,10); }
+function saveLastBatch(id){ try{ localStorage.setItem(LS_KEY, JSON.stringify({batch_id:id, saved_at:Date.now()})); }catch(e){} }
+function clearLastBatch(){ try{ localStorage.removeItem(LS_KEY); }catch(e){} }
+function getLastBatch(){ try{ return JSON.parse(localStorage.getItem(LS_KEY) || "null"); }catch(e){ return null; } }
+function setPill(text, cls){ const p = $("pill"); p.textContent = text; p.className = "pill" + (cls ? " " + cls : ""); }
+
+// ---------- view switching ----------
+function show(view){
+  ["upload","status","report","units"].forEach(v => $("view-" + v).classList.toggle("hidden", v !== view));
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.view === view));
+  if (view === "report" && state.reportHtml) renderReport();
+  if (view === "units" && state.unitsData) renderUnits();
+}
+document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => show(b.dataset.view)));
+
+// ---------- upload ----------
+const dz = $("dropzone"), fi = $("fileInput");
+function addFiles(list){
+  Array.from(list).forEach(f => { if (!state.files.some(x => x.file.name === f.name)) state.files.push({ file: f }); });
+  refreshFileList();
+}
+function refreshFileList(){
+  $("fileList").innerHTML = state.files.map(f => `
+    <div class="filerow">
+      <span class="ext">${esc(f.file.name.split(".").pop().toUpperCase())}</span>
+      <span class="name">${esc(f.file.name)}</span>
+      <span class="size">${(f.file.size/1024).toFixed(0)} KB</span>
+      <button title="Remove" onclick="removeFile('${esc(f.file.name)}')">✕</button>
+    </div>`).join("");
+  $("uploadBtn").disabled = !state.files.length;
+}
+window.removeFile = name => { state.files = state.files.filter(f => f.file.name !== name); refreshFileList(); };
+dz.addEventListener("click", () => fi.click());
+dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("drag"); });
+dz.addEventListener("dragleave", () => dz.classList.remove("drag"));
+dz.addEventListener("drop", e => { e.preventDefault(); dz.classList.remove("drag"); addFiles(e.dataTransfer.files); });
+fi.addEventListener("change", () => { addFiles(fi.files); fi.value = ""; });
+
+$("uploadBtn").addEventListener("click", async () => {
+  if (!state.files.length) return;
+  const btn = $("uploadBtn");
+  btn.disabled = true;
+  $("uploadStatus").innerHTML = `<span class="spinner"></span>Uploading ${state.files.length} file(s)…`;
+  const batchId = makeBatchId();
+  const fd = new FormData();
+  fd.append("batch_id", batchId);
+  state.files.forEach(f => fd.append("files", f.file, f.file.name));
+  try {
+    const data = await api("/pd02/intake", { method: "POST", body: fd });
+    state.batchId = data.batch_id || batchId;
+    saveLastBatch(state.batchId);
+    state.files = [];
+    refreshFileList();
+    startStatusPolling();
+  } catch(e){
+    $("uploadStatus").innerHTML = `<span class="err">Upload failed: ${esc(e.message)}</span>`;
+    btn.disabled = false;
+  }
+});
+
+// ---------- status polling ----------
+function startStatusPolling(){
+  setPill("Processing", "processing");
+  show("status");
+  $("batchIdLabel").textContent = state.batchId;
+  $("statusTitle").textContent = "AI is reading the documents…";
+  state.pollStart = Date.now();
+  pollStatus();
+  if (state.polling) clearInterval(state.polling);
+  state.polling = setInterval(pollStatus, 2500);
+}
+async function pollStatus(){
+  if (!state.batchId) return;
+  let d;
+  try { d = await api("/pd02/batch-status?batch_id=" + encodeURIComponent(state.batchId)); }
+  catch(e){ return; } // transient — keep polling
+  if (!d.ok) {
+    // "Batch not found" for the first minutes = async persistence not done yet (FA-03 lesson)
+    if (Date.now() - state.pollStart < 4 * 60 * 1000) return;
+    $("statusText").innerHTML = `<span class="err">Batch not found on the server.</span>`;
+    return;
+  }
+  renderStatus(d);
+  if (d.status === "complete"){
+    if (state.polling) clearInterval(state.polling);
+    setPill("Complete", "complete");
+    $("statusTitle").textContent = "Pipeline complete — report generated Sunday 23:00, waiting in the inbox";
+    loadUnits();
+    loadReport();
+    show("report");
+  }
+}
+function renderStatus(d){
+  const done = d.processed_files || 0, total = d.total_files || 0;
+  $("progressFill").style.width = total ? Math.round(done / total * 100) + "%" : "0%";
+  $("statusText").textContent = `${done} / ${total} documents processed`;
+  $("statusChips").innerHTML = (d.documents || []).map(doc => {
+    const t = doc.doc_type || "unknown";
+    const tag = t === "price_list" ? "pl" : t === "sales_arrangement" ? "sa" : t === "transaction_register" ? "rt" : "none";
+    const st = doc.doc_status === "REVIEW" ? `<span class="tag review">review</span>` : `<span class="tag ok">ok</span>`;
+    return `<div class="chip"><span class="fn">${esc(doc.file_name)}</span>${st}` +
+           `<span class="tag ${tag}">${esc(t.replace(/_/g," "))}</span>` +
+           (doc.development ? `<span style="font-size:11px">${esc(doc.development)}</span>` : "") +
+           (doc.doc_status === "REVIEW" ? `<span class="tag review">${doc.warning_count}</span>` : "") + `</div>`;
+  }).join("");
+}
+
+// ---------- units ----------
+async function loadUnits(){
+  try {
+    const d = await api("/pd02/units?batch_id=" + encodeURIComponent(state.batchId));
+    state.unitsData = d;
+    renderUnits();
+  } catch(e){ /* report view is the primary outcome */ }
+}
+function renderUnits(){
+  const d = state.unitsData;
+  if (!d) return;
+  const s = d.stats || {};
+  $("unitsKpis").innerHTML = [
+    ["Units sold", s.sold_total ?? "—", ""],
+    ["Take-up", s.take_up_pct != null ? s.take_up_pct + "%" : "—", ""],
+    ["Avg $/sq ft", s.avg_price_psf != null ? "$" + (+s.avg_price_psf).toLocaleString() : "—", ""],
+    ["Review queue", (d.review_queue || []).length, ""],
+  ].map(([l,v]) => `<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div></div>`).join("");
+  $("reviewQueue").innerHTML = (d.review_queue || []).map(r => `
+    <div class="reviewcard">
+      <div class="head">
+        <span class="fn">${esc(r.file_name)}</span>
+        ${r.duplicate ? '<span class="badge dup">DUPLICATE</span>' : '<span class="badge" style="background:var(--amber-soft);color:var(--amber)">REVIEW</span>'}
+      </div>
+      <div class="body">${(r.review_reasons || []).map(x => `<div>• ${esc(x)}</div>`).join("")}
+      ${r.ai_guess ? `<div style="color:var(--amber);margin-top:4px">AI guess: ${esc(r.ai_guess.development || "")} — ${esc(r.ai_guess.reason || "")}</div>` : ""}
+      </div>
+    </div>`).join("") || '<p style="color:var(--muted)">Review queue is empty — everything matched.</p>';
+  renderUnitsTable();
+}
+function renderUnitsTable(){
+  const d = state.unitsData;
+  if (!d) return;
+  const dev = $("devFilter").value, st = $("statusFilter").value, q = $("unitSearch").value.trim().toUpperCase();
+  const rows = (d.units || []).filter(u =>
+    (!dev || u.development === dev) &&
+    (!st || u.status === st) &&
+    (!q || (u.unit_key || "").includes(q))
+  );
+  $("unitCount").textContent = rows.length + " / " + (d.units || []).length + " units";
+  $("unitsBody").innerHTML = rows.map(u => `
+    <tr>
+      <td>${esc(u.development_name || u.development)}</td>
+      <td class="mono">${esc(u.unit_key)}</td>
+      <td class="num">${u.saleable_area_sqft ?? "—"}</td>
+      <td class="num">${u.list_price ? u.list_price.toLocaleString() : "—"}</td>
+      <td>${esc(u.sale_date || "—")}</td>
+      <td class="num">${u.transaction_price ? u.transaction_price.toLocaleString() : "—"}</td>
+      <td class="num">${u.price_per_sqft ? u.price_per_sqft.toLocaleString() : "—"}</td>
+      <td>${esc(u.transaction_date || "—")}</td>
+      <td>${esc(u.purchaser_type || "—")}</td>
+      <td>${statusBadge(u)}</td>
+    </tr>`).join("");
+}
+function statusBadge(u){
+  const map = { sold:["sold","SOLD"], terminated:["term","TERMINATED"], selling:["selling","SELLING"], offered:["offered","OFFERED"] };
+  const [cls, label] = map[u.status] || ["","—"];
+  return `<span class="badge ${cls}">${label}</span>` + (u.unlisted_unit ? ' <span class="badge" style="background:#f1ecff;color:#6b4fb3">UNLISTED</span>' : "");
+}
+$("devFilter").addEventListener("change", renderUnitsTable);
+$("statusFilter").addEventListener("change", renderUnitsTable);
+$("unitSearch").addEventListener("input", renderUnitsTable);
+
+// ---------- report ----------
+async function loadReport(){
+  try {
+    const html = await api("/pd02/report?batch_id=" + encodeURIComponent(state.batchId));
+    state.reportHtml = html;
+    renderReport();
+  } catch(e){}
+}
+function renderReport(){
+  $("reportFrame").srcdoc = state.reportHtml;
+}
+$("downloadReportBtn").addEventListener("click", () => {
+  if (!state.reportHtml) return;
+  const a = document.createElement("a");
+  a.href = "data:text/html;charset=utf-8," + encodeURIComponent(state.reportHtml);
+  a.download = "weekly_report_" + (state.batchId || "pd02") + ".html";
+  a.click();
+});
+
+// ---------- resume ----------
+function showResumeCard(){
+  const saved = getLastBatch();
+  const card = $("resumeCard");
+  if (!saved || !saved.batch_id) return;
+  $("resumeBatchId").textContent = saved.batch_id;
+  card.classList.remove("hidden");
+}
+$("resumeBtn").addEventListener("click", async () => {
+  const saved = getLastBatch();
+  if (!saved) return;
+  state.batchId = saved.batch_id;
+  $("batchIdLabel").textContent = state.batchId;
+  $("resumeCard").classList.add("hidden");
+  setPill("Resuming", "processing");
+  show("status");
+  try {
+    const d = await api("/pd02/batch-status?batch_id=" + encodeURIComponent(state.batchId));
+    if (d.ok && d.status === "complete"){
+      renderStatus(d);
+      setPill("Complete", "complete");
+      loadUnits();
+      loadReport();
+      show("report");
+    } else {
+      startStatusPolling();
+    }
+  } catch(e){
+    $("statusText").innerHTML = `<span class="err">Could not resume: ${esc(e.message)}</span>`;
+  }
+});
+$("clearResumeBtn").addEventListener("click", () => { clearLastBatch(); $("resumeCard").classList.add("hidden"); });
+
+// ---------- init ----------
+$("endpointLabel").textContent = BASE + "/pd02/intake · /pd02/batch-status · /pd02/units · /pd02/report";
+showResumeCard();
+</script>
+</body>
+</html>
