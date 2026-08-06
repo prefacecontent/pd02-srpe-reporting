@@ -581,7 +581,7 @@
           "temperature": 0.1
         }
       },
-      "id": "6a64caa3-4bf3-4684-b95b-9d7a5d20e394",
+      "id": "c61297cb-9253-441f-868f-856e55f705a8",
       "name": "Gemini Model - Classify Document",
       "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
       "typeVersion": 1.1,
@@ -604,7 +604,7 @@
           "temperature": 0.1
         }
       },
-      "id": "6aea8e6a-d8dc-42a9-9878-d9ce3add720d",
+      "id": "b4b2bd57-19d8-40ae-9950-194656f05b88",
       "name": "Gemini Model - Extract Price List",
       "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
       "typeVersion": 1.1,
@@ -627,7 +627,7 @@
           "temperature": 0.1
         }
       },
-      "id": "d37f2422-e126-460b-a8c0-8e8bb052e729",
+      "id": "d4655ea4-5763-471e-86de-85d772ba4ace",
       "name": "Gemini Model - Extract Sales Arrangement",
       "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
       "typeVersion": 1.1,
@@ -650,7 +650,7 @@
           "temperature": 0.1
         }
       },
-      "id": "15439cd7-7bc0-438d-8a32-063c7d67694f",
+      "id": "53e935c6-8260-417d-ac08-530ffc88c377",
       "name": "Gemini Model - Extract Transaction Register",
       "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
       "typeVersion": 1.1,
@@ -677,7 +677,7 @@
           ]
         }
       },
-      "id": "ed5eb43f-aa85-4bc3-8339-a6e7fc6d6d9e",
+      "id": "0e24ffa9-6cb9-42db-ad65-d2143cc2d93e",
       "name": "Schedule Trigger (hourly)",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
@@ -707,7 +707,7 @@
           }
         }
       },
-      "id": "487a8933-48e8-42e6-b4d5-c37ddd9169c3",
+      "id": "fa046513-d2c5-4d95-89b4-2db8b884b499",
       "name": "POST pd02/check",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
@@ -718,9 +718,10 @@
     },
     {
       "parameters": {
-        "jsCode": "// Triggered hourly (schedule) or manually (POST /pd02/check).\n// output 0: one item -> refresh the 521-project developments list\n// output 1: one item per watched development\nconst sd = $getWorkflowStaticData('global');\nsd.pd02_v2 = sd.pd02_v2 || { watchlist: {}, developments: [], inventory: {}, file_meta: {}, check_log: [] };\nconst watchlist = Object.values(sd.pd02_v2.watchlist || {});\nconst nowIso = new Date().toISOString();\nif (!watchlist.length) {\n  sd.pd02_v2.last_check = { at: nowIso, devs_checked: 0, new_docs: 0, note: 'watchlist is empty' };\n}\nconst devItems = watchlist.map(d => ({ json: {\n  dev_id: d.dev_id, name_en: d.name_en || '', name_zh: d.name_zh || '',\n  phase_en: d.phase_en || '', phase_zh: d.phase_zh || '',\n} }));\nreturn [\n  [{ json: { task: 'refresh_developments', at: nowIso } }],\n  devItems,\n];"
+        "jsCode": "// Triggered hourly (schedule) or manually (POST /pd02/check).\n// output 0: one item -> refresh the 521-project developments list\n// output 1: one item per watched development\nconst sd = $getWorkflowStaticData('global');\nsd.pd02_v2 = sd.pd02_v2 || { watchlist: {}, developments: [], inventory: {}, file_meta: {}, check_log: [] };\nconst watchlist = Object.values(sd.pd02_v2.watchlist || {});\nconst nowIso = new Date().toISOString();\nif (!watchlist.length) {\n  sd.pd02_v2.last_check = { at: nowIso, devs_checked: 0, new_docs: 0, note: 'watchlist is empty' };\n}\nconst devItems = watchlist.map(d => ({ json: {\n  dev_id: d.dev_id, name_en: d.name_en || '', name_zh: d.name_zh || '',\n  phase_en: d.phase_en || '', phase_zh: d.phase_zh || '',\n} }));\nreturn [\n  [{ json: { task: 'refresh_developments', at: nowIso } }],\n  devItems,\n];",
+        "mode": "runOnceForAllItems"
       },
-      "id": "1efc481f-3d0e-415b-ac4c-7a128c4947b4",
+      "id": "b0dc0c89-904a-4be0-b554-6b1c9eaf952b",
       "name": "Run SRPE Check",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -735,12 +736,12 @@
         "url": "https://www.srpe.gov.hk/api/SrpeWebService/DevBldgSearch/getDevBldgSearchResult",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "PLACEHOLDER",
+        "jsonBody": "={\"language\":\"en\"}",
         "options": {
           "timeout": 90000
         }
       },
-      "id": "b738cb19-fa4c-4cd8-96f9-4c82f10055d7",
+      "id": "699a8e0c-6ea7-4fc8-8727-331da1981c05",
       "name": "Fetch Developments List",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -753,7 +754,7 @@
       "parameters": {
         "jsCode": "const resp = $input.first().json;\nconst list = (resp.resultData && resp.resultData.list) || [];\nconst trimmed = list.filter(d => d && d.id).map(d => ({\n  dev_id: String(d.id),\n  name_en: d.engName || '',\n  name_zh: d.chnName || '',\n  phase_en: d.engPhaseName || '',\n  phase_zh: d.chnPhaseName || '',\n  district_en: d.engDistrict || '',\n  district_zh: d.chnDistrict || '',\n  address_en: ((d.addresses || [])[0] || {}).engAddress || '',\n  address_zh: ((d.addresses || [])[0] || {}).chnAddress || '',\n  active: d.active === 'Y',\n}));\nconst sd = $getWorkflowStaticData('global');\nsd.pd02_v2.developments = trimmed;\nsd.pd02_v2.developments_refreshed_at = new Date().toISOString();\nreturn [{ json: { stored: trimmed.length } }];"
       },
-      "id": "b59d4352-f950-4c70-bed9-5b08dba992cb",
+      "id": "59c57723-a3de-42f6-aed4-e4d11b58b8c9",
       "name": "Store Developments",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -773,7 +774,7 @@
           "timeout": 90000
         }
       },
-      "id": "692468c6-dd83-4605-b2a1-a849ca1a1d26",
+      "id": "f4557152-f148-4064-85a1-b04ba81bfc62",
       "name": "Fetch Development Info",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -787,7 +788,7 @@
         "jsCode": "// \"Run Once for All Items\": every watched development's payload arrives here.\n// Compares each dev's document list against the stored inventory; emits one item\n// per NEW price list / sales arrangement / register (brochures are recorded but\n// not extracted — the frontend views them directly from SRPE).\nconst items = $input.all().map(i => i.json);\nconst sd = $getWorkflowStaticData('global');\nsd.pd02_v2 = sd.pd02_v2 || {};\nsd.pd02_v2.inventory = sd.pd02_v2.inventory || {};\nsd.pd02_v2.check_log = sd.pd02_v2.check_log || [];\nconst newDocs = [];\nlet devsChecked = 0;\nfor (const it of items) {\n  const devId = String(it.dev_id || '');\n  if (!devId) continue;\n  const devInfo = (it.resultData && it.resultData.devInfoResp) || {};\n  const inv = sd.pd02_v2.inventory[devId] = sd.pd02_v2.inventory[devId] || { docs: {}, is_new: {} };\n  inv.last_checked_at = new Date().toISOString();\n  const brochure = devInfo.brochure;\n  const collections = {\n    price_list: devInfo.prices || [],\n    sales_arrangement: devInfo.salesArrangements || [],\n    transaction_register: devInfo.transactions || [],\n    brochure: brochure ? (brochure.partFiles || [brochure]) : [],\n  };\n  for (const [type, docs] of Object.entries(collections)) {\n    inv.docs[type] = inv.docs[type] || [];\n    inv.is_new[type] = [];\n    for (const d of docs) {\n      if (!d || !d.id) continue;\n      const rec = {\n        id: String(d.id),\n        seq: d.seq != null ? String(d.seq) : '',\n        fileName: (d.file && d.file.fileName) || d.fileName || '',\n        fileSize: (d.file && d.file.fileSize) || d.fileSize || null,\n        submissionTime: (d.file && d.file.submissionTime) || d.updateDateTime || d.dateOfPrinting || d.updateDate || null,\n        serialNo: d.serialNo || null,\n      };\n      const known = inv.docs[type].some(x => x.id === rec.id);\n      if (!known) {\n        inv.docs[type].push(rec);\n        inv.is_new[type].push(rec.id);\n        if (type !== 'brochure') {\n          newDocs.push({\n            json: {\n              dev_id: devId, name_en: it.name_en || '', name_zh: it.name_zh || '',\n              doc_type: type, doc_id: rec.id, seq: rec.seq,\n              file_name: rec.fileName, submission_time: rec.submissionTime,\n            },\n          });\n        }\n      }\n    }\n  }\n  devsChecked++;\n}\nconst nowIso = new Date().toISOString();\nsd.pd02_v2.last_check = { at: nowIso, devs_checked: devsChecked, new_docs: newDocs.length };\nsd.pd02_v2.check_log.unshift({\n  at: nowIso, devs_checked: devsChecked, new_docs: newDocs.length,\n  new_files: newDocs.map(x => x.json.file_name),\n});\nsd.pd02_v2.check_log = sd.pd02_v2.check_log.slice(0, 50);\n// Download queue consumed by \"Initialise Monitor Batch\" (HTTP drops input metadata).\nsd.pd02_v2.pending_downloads = newDocs.map(x => x.json);\nreturn newDocs.length ? [newDocs, [{ json: { no_changes: true, checked_devs: devsChecked } }]]\n                     : [[], [{ json: { no_changes: true, checked_devs: devsChecked } }]];",
         "mode": "runOnceForAllItems"
       },
-      "id": "4b431d84-a8bc-41b4-9a4d-8d3961898720",
+      "id": "d446ecdd-f8b6-4a1d-98b3-38966bff54ef",
       "name": "Diff & Detect New Documents",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -800,7 +801,7 @@
       "parameters": {
         "jsCode": "// Nothing new since the last check — zero LLM cost this cycle.\nreturn $input.all();"
       },
-      "id": "a930592f-a2df-4c09-9998-41fc9c5b2cf2",
+      "id": "664456f2-9fa2-4c51-be8b-14f123506b23",
       "name": "No Changes (skip)",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -821,7 +822,7 @@
         },
         "responseFormat": "file"
       },
-      "id": "39fb1425-d522-4668-9f2a-b775b757625a",
+      "id": "936b6167-a98a-48d3-8dc2-51584c127dfc",
       "name": "Download New Documents",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -835,7 +836,7 @@
         "jsCode": "// \"Run Once for All Items\": merge the downloaded binaries into one item and\n// create the monitor batch (same storage contract as the intake batch).\nconst items = $input.all();\nconst sd = $getWorkflowStaticData('global');\nconst pending = (sd.pd02_v2 && sd.pd02_v2.pending_downloads) || [];\nif (!items.length) throw new Error('No documents downloaded.');\nif (items.length !== pending.length) throw new Error('Download count mismatch: ' + items.length + ' vs pending ' + pending.length);\nconst binaries = {};\nconst fileMeta = {};\nconst devs = new Set();\nitems.forEach((it, i) => {\n  const meta = pending[i] || {};\n  const b = it.binary && it.binary.data;\n  if (!b) throw new Error('Missing binary for ' + meta.file_name);\n  const key = 'file' + (i + 1);\n  binaries[key] = b;\n  const fn = meta.file_name || key;\n  fileMeta[fn] = {\n    dev_id: meta.dev_id,\n    development: meta.dev_id,\n    development_name: (meta.name_en ? meta.name_en + (meta.name_zh ? ' ' + meta.name_zh : '') : fn),\n  };\n  if (meta.dev_id) devs.add(meta.dev_id);\n});\nsd.pd02_v2.pending_downloads = [];\nsd.pd02_v2.file_meta = sd.pd02_v2.file_meta || {};\n// GC file_meta: keep the 20 most recent batches.\nconst metaKeys = Object.keys(sd.pd02_v2.file_meta);\nif (metaKeys.length > 20) {\n  for (const k of metaKeys.slice(0, metaKeys.length - 20)) delete sd.pd02_v2.file_meta[k];\n}\nconst batchId = 'pd02-m-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);\nconst now = new Date();\nsd.pd02_v1 = sd.pd02_v1 || { batches: {} };\nfor (const [id, batch] of Object.entries(sd.pd02_v1.batches)) {\n  const created = Date.parse(batch.created_at || 0);\n  if (!Number.isFinite(created) || now.getTime() - created > 24 * 60 * 60 * 1000) delete sd.pd02_v1.batches[id];\n}\nsd.pd02_v1.batches[batchId] = {\n  batch_id: batchId,\n  status: 'processing',\n  created_at: now.toISOString(),\n  updated_at: now.toISOString(),\n  total_files: items.length,\n  processed_files: 0,\n  records: [],\n  units: [],\n  review_queue: [],\n  stats: null,\n  weekly_report_html: null,\n  origin: 'monitor',\n  source_devs: Array.from(devs),\n};\nsd.pd02_v2.file_meta[batchId] = fileMeta;\nif (sd.pd02_v2.last_check) sd.pd02_v2.last_check.batch_id = batchId;\nreturn [{ json: { batch_id: batchId, total_files: items.length }, binary: binaries }];",
         "mode": "runOnceForAllItems"
       },
-      "id": "d379ff66-6d4a-4e49-8bd0-4268dfd64ae7",
+      "id": "43b4f12f-9ced-4c7c-a56d-99ab4214ef33",
       "name": "Initialise Monitor Batch",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -848,7 +849,7 @@
       "parameters": {
         "jsCode": "// After a monitor batch completes: clear NEW flags for processed files and log it.\nconst data = $input.first().json;\nconst sd = $getWorkflowStaticData('global');\nconst batchId = String(data.batch_id || '');\nconst batch = sd.pd02_v1 && sd.pd02_v1.batches[batchId];\nif (!batch || batch.origin !== 'monitor') {\n  return [{ json: { batch_id: batchId, status: data.status, skipped: true } }];\n}\nconst meta = (sd.pd02_v2 && sd.pd02_v2.file_meta && sd.pd02_v2.file_meta[batchId]) || {};\nconst processedFiles = Object.keys(meta);\nif (sd.pd02_v2 && sd.pd02_v2.inventory) {\n  for (const inv of Object.values(sd.pd02_v2.inventory)) {\n    for (const type of Object.keys(inv.is_new || {})) {\n      inv.is_new[type] = (inv.is_new[type] || []).filter(id => {\n        const doc = (inv.docs[type] || []).find(x => x.id === id);\n        return doc && !processedFiles.includes(doc.fileName);\n      });\n    }\n  }\n}\nif (sd.pd02_v2 && sd.pd02_v2.last_check) sd.pd02_v2.last_check.completed_at = new Date().toISOString();\nif (sd.pd02_v2 && sd.pd02_v2.check_log && sd.pd02_v2.check_log.length) {\n  const last = sd.pd02_v2.check_log[0];\n  if (!last.completed_at) {\n    last.completed_at = new Date().toISOString();\n    last.batch_id = batchId;\n    last.processed_files = processedFiles.length;\n  }\n}\nreturn [{ json: { batch_id: batchId, status: data.status, processed_files: processedFiles.length } }];"
       },
-      "id": "d66b4590-8b23-436b-ae6b-6627d0985707",
+      "id": "07701034-4819-43aa-8986-0f1585a7870b",
       "name": "Update Monitor State",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -863,7 +864,7 @@
         "path": "pd02/watchlist",
         "responseMode": "responseNode"
       },
-      "id": "a2d8acf1-3e1c-4d49-ac13-f07db1d08c6e",
+      "id": "672f509f-c81d-4065-ba9a-36773fd05c40",
       "name": "GET pd02/watchlist",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
@@ -878,7 +879,7 @@
         "path": "pd02/watchlist",
         "responseMode": "responseNode"
       },
-      "id": "7a37b0c3-8bf2-4089-9b4f-be4a7f3e5b7c",
+      "id": "f7213f72-27ec-4a29-a35a-963a4ed76c89",
       "name": "POST pd02/watchlist",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
@@ -891,7 +892,7 @@
       "parameters": {
         "jsCode": "// GET -> current watchlist. POST {action:'add'|'remove', dev_id, ...} -> mutate.\nconst sd = $getWorkflowStaticData('global');\nsd.pd02_v2 = sd.pd02_v2 || {};\nsd.pd02_v2.watchlist = sd.pd02_v2.watchlist || {};\nconst body = $json.body || {};\nconst action = String(body.action || '').toLowerCase();\nif (action === 'add' && body.dev_id) {\n  sd.pd02_v2.watchlist[String(body.dev_id)] = {\n    dev_id: String(body.dev_id),\n    name_en: body.name_en || '', name_zh: body.name_zh || '',\n    phase_en: body.phase_en || '', phase_zh: body.phase_zh || '',\n    district_en: body.district_en || '', district_zh: body.district_zh || '',\n    address_en: body.address_en || '', address_zh: body.address_zh || '',\n    added_at: new Date().toISOString(),\n  };\n} else if (action === 'remove' && body.dev_id) {\n  delete sd.pd02_v2.watchlist[String(body.dev_id)];\n}\nreturn [{ json: { ok: true, watchlist: Object.values(sd.pd02_v2.watchlist), _status: 200 } }];"
       },
-      "id": "4f93bd6d-eafb-4767-ab3f-c760172f3d1e",
+      "id": "ef5be669-e185-402f-9dce-8c86b5484784",
       "name": "Manage Watchlist",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -924,7 +925,7 @@
           }
         }
       },
-      "id": "ba80f607-c67d-4efc-aa85-26a9dbb988df",
+      "id": "f1e84679-d021-48f4-bfe9-1357a5af6dea",
       "name": "Respond Watchlist",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.4,
@@ -939,7 +940,7 @@
         "path": "pd02/developments",
         "responseMode": "responseNode"
       },
-      "id": "b3600b00-cc8e-46b5-affe-652fa1d187b8",
+      "id": "1146a512-79ea-43e0-84ad-ae702ba1bd3d",
       "name": "GET pd02/developments",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
@@ -952,7 +953,7 @@
       "parameters": {
         "jsCode": "const sd = $getWorkflowStaticData('global');\nconst devs = (sd.pd02_v2 && sd.pd02_v2.developments) || [];\nreturn [{ json: {\n  ok: true,\n  count: devs.length,\n  refreshed_at: (sd.pd02_v2 && sd.pd02_v2.developments_refreshed_at) || null,\n  developments: devs,\n  _status: 200,\n} }];"
       },
-      "id": "57c90f65-c54d-4e4d-847e-f4033df46b51",
+      "id": "9a137650-3e92-4a78-a514-6ea4f7dd8c93",
       "name": "Read Developments",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -985,7 +986,7 @@
           }
         }
       },
-      "id": "efa64bd8-51f2-4fe1-b296-e23012b6381a",
+      "id": "6886f991-758b-4cc7-be39-4f1365af21e1",
       "name": "Respond Developments",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.4,
@@ -1000,7 +1001,7 @@
         "path": "pd02/snapshot",
         "responseMode": "responseNode"
       },
-      "id": "7700d0cd-0dc1-4da4-9c41-2f1d24b061fa",
+      "id": "e103818a-72bb-4002-bcba-5f3fbb17d468",
       "name": "GET pd02/snapshot",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
@@ -1013,7 +1014,7 @@
       "parameters": {
         "jsCode": "const sd = $getWorkflowStaticData('global');\nconst v2 = sd.pd02_v2 || {};\nconst watchlist = Object.values(v2.watchlist || {});\nconst inventory = [];\nfor (const [devId, inv] of Object.entries(v2.inventory || {})) {\n  const wl = (v2.watchlist || {})[devId];\n  inventory.push({\n    dev_id: devId,\n    name_en: (wl && wl.name_en) || '',\n    name_zh: (wl && wl.name_zh) || '',\n    last_checked_at: inv.last_checked_at || null,\n    docs: inv.docs || {},\n    is_new: inv.is_new || {},\n  });\n}\nlet latest_batch = null;\nconst lastBatchId = v2.last_check && v2.last_check.batch_id;\nif (lastBatchId && sd.pd02_v1 && sd.pd02_v1.batches[lastBatchId]) {\n  const b = sd.pd02_v1.batches[lastBatchId];\n  latest_batch = {\n    batch_id: b.batch_id,\n    status: b.status,\n    total_files: b.total_files,\n    processed_files: b.processed_files,\n    unit_count: (b.units || []).length,\n    review_count: (b.review_queue || []).length,\n    stats: b.stats || null,\n    created_at: b.created_at,\n    origin: b.origin || 'intake',\n  };\n}\nreturn [{ json: {\n  ok: true,\n  watchlist,\n  inventory,\n  developments: {\n    count: (v2.developments || []).length,\n    refreshed_at: v2.developments_refreshed_at || null,\n  },\n  last_check: v2.last_check || null,\n  check_log: (v2.check_log || []).slice(0, 20),\n  latest_batch,\n  _status: 200,\n} }];"
       },
-      "id": "2c9cdc4b-fa34-42d7-aa1f-06ad5200fa3b",
+      "id": "14dcd4ce-b6b0-4804-a71e-2a5d04f83eb3",
       "name": "Read Snapshot",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1046,7 +1047,7 @@
           }
         }
       },
-      "id": "0a511dfc-c841-4d9b-96d0-d04b67169050",
+      "id": "93bb6cab-fa91-4b0f-b98e-d91e7fe21f28",
       "name": "Respond Snapshot",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.4,
@@ -1059,7 +1060,7 @@
       "parameters": {
         "jsCode": "// Real SRPE price lists hold hundreds of rows; one LLM call cannot reliably\n// emit them all. Split into ~15k-char chunks (with overlap) for per-chunk extraction.\nconst item = $input.first().json;\nconst text = String(item.text || '');\nconst CHUNK = 15000;\nconst OVERLAP = 1000;\nif (!text.trim()) return [{ json: { ...item, chunk_index: 0, chunk_total: 1, text } }];\nif (text.length <= CHUNK) return [{ json: { ...item, chunk_index: 0, chunk_total: 1, text } }];\nconst chunks = [];\nlet i = 0;\nwhile (i < text.length) {\n  let end = Math.min(i + CHUNK, text.length);\n  if (end < text.length) {\n    const nl = text.lastIndexOf('\\n', end);\n    if (nl > i + CHUNK * 0.7) end = nl;\n  }\n  chunks.push(text.slice(i, end));\n  if (end === text.length) break;   // tail done — avoid degenerate 1-char steps\n  i = Math.max(end - OVERLAP, i + 1);\n}\nreturn chunks.map((c, k) => ({ json: { ...item, chunk_index: k, chunk_total: chunks.length, text: c } }));"
       },
-      "id": "b92b95e7-1118-49f1-a6c4-281891819744",
+      "id": "cd5dea92-676c-47fb-b9c5-e727d60e8226",
       "name": "Chunk Price List Text",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1073,7 +1074,7 @@
         "jsCode": "// \"Run Once for All Items\": merge per-chunk extractions into one price-list record.\nconst items = $input.all().map(i => i.json);\nconst merged = {\n  document_type: 'price_list',\n  development: null, development_name: null,\n  price_list_no: null, price_list_date: null, currency: null, payment_plan: null,\n  units: [],\n};\nconst seen = new Set();\nfor (const it of items) {\n  const ex = it.output || it;\n  for (const k of ['development', 'development_name', 'price_list_no', 'price_list_date', 'currency', 'payment_plan']) {\n    if (merged[k] == null && ex[k] != null) merged[k] = ex[k];\n  }\n  for (const u of (ex.units || [])) {\n    if (!u || !u.unit_key) continue;\n    if (seen.has(u.unit_key)) continue;   // overlapping chunks may duplicate a row\n    seen.add(u.unit_key);\n    merged.units.push(u);\n  }\n}\nreturn [{ json: { output: merged, file_input: items[0] && items[0].file_input } }];",
         "mode": "runOnceForAllItems"
       },
-      "id": "e71d3f90-22c4-4f79-8583-e21f2dbfca7c",
+      "id": "a05324a6-92ad-4d46-b66a-449ca62e54c5",
       "name": "Merge Price List Chunks",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
