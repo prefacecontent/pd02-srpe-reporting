@@ -1,1 +1,1580 @@
-placeholder
+{
+  "name": "PD-02 Weekly SRPE Sales Reporting (v2.0)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pd02/intake",
+        "responseMode": "onReceived",
+        "options": {
+          "responseCode": 202,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      },
+      "id": "a2154136-a95a-40d8-bc02-321f13c098f6",
+      "name": "POST pd02/intake",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst binaries = item.binary || {};\nconst entries = Object.entries(binaries);\nif (!entries.length) throw new Error('No uploaded files were received. Send multipart/form-data with one or more PDF files.');\n\nconst body = item.json?.body || {};\nconst supplied = String(body.batch_id || '').trim();\nconst batchId = /^[A-Za-z0-9_-]{8,100}$/.test(supplied)\n  ? supplied\n  : `pd02-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;\nconst now = new Date();\nconst sd = $getWorkflowStaticData('global');\nsd.pd02_v1 = sd.pd02_v1 || { batches: {} };\n\n// Keep demo storage bounded: remove batches older than 24 hours, retain at most 50.\nfor (const [id, batch] of Object.entries(sd.pd02_v1.batches)) {\n  const created = Date.parse(batch.created_at || 0);\n  if (!Number.isFinite(created) || now.getTime() - created > 24 * 60 * 60 * 1000) delete sd.pd02_v1.batches[id];\n}\nconst remaining = Object.entries(sd.pd02_v1.batches)\n  .sort((a, b) => Date.parse(b[1].created_at || 0) - Date.parse(a[1].created_at || 0));\nfor (const [id] of remaining.slice(49)) delete sd.pd02_v1.batches[id];\n\nsd.pd02_v1.batches[batchId] = {\n  batch_id: batchId,\n  status: 'processing',\n  created_at: now.toISOString(),\n  updated_at: now.toISOString(),\n  total_files: entries.length,\n  processed_files: 0,\n  records: [],\n  units: [],\n  review_queue: [],\n  stats: null,\n  weekly_report_html: null,\n};\n\nreturn [{ json: { batch_id: batchId, total_files: entries.length }, binary: item.binary, pairedItem: { item: 0 } }];"
+      },
+      "id": "e7b51d9a-adfe-4f22-9ec5-e6f68d824b5a",
+      "name": "Initialise Web Batch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first();\nconst binaries = input.binary || {};\nconst entries = Object.entries(binaries);\nif (!entries.length) throw new Error('No uploaded files were found.');\nconst batchId = String(input.json.batch_id || '');\nconst totalFiles = entries.length;\n\nreturn entries.map(([propertyName, file], index) => {\n  const fileName = file.fileName || propertyName;\n  // Extension from the FILENAME is reliable; n8n's fileExtension metadata is MIME-derived.\n  const nameExt = String(fileName.split('.').pop() || '').toLowerCase();\n  const metaExt = String(file.fileExtension || '').toLowerCase().split('/').pop();\n  const extension = (nameExt && nameExt.length <= 6 && /^[a-z0-9]+$/.test(nameExt)) ? nameExt : metaExt;\n  return {\n    json: {\n      batch_id: batchId,\n      file_index: index,\n      total_files: totalFiles,\n      upload_property: propertyName,\n      file_name: fileName,\n      file_extension: extension,\n      source_mime_type: file.mimeType || '',\n      reported_file_size: file.fileSize || null,\n    },\n    binary: { data: file },\n    pairedItem: { item: 0 },\n  };\n});"
+      },
+      "id": "4b708510-1b1a-43fc-86d5-c7a6920a93fb",
+      "name": "Split Uploaded Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "options": {},
+        "batchSize": 1
+      },
+      "id": "76dcde25-938c-4e66-89b0-1c2416b40185",
+      "name": "Loop Over Files",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        600,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ $json.file_extension === 'pdf' ? 0 : 1 }}"
+      },
+      "id": "a358cbd9-6458-4beb-a819-8771e2a0e030",
+      "name": "File Type Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        800,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "binaryPropertyName": "data",
+        "encrypted": false
+      },
+      "id": "6ee95dcb-081e-40a8-8ab5-a4907fe9bbdf",
+      "name": "Read PDF",
+      "type": "n8n-nodes-base.readPDF",
+      "typeVersion": 1,
+      "position": [
+        1000,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const source = $('Split Uploaded Files').item.json;\n\nfunction findText(value, depth = 0) {\n  if (depth > 6 || value == null) return '';\n  if (typeof value === 'string') return value;\n  if (Array.isArray(value)) return value.map(v => findText(v, depth + 1)).filter(Boolean).join('\\n');\n  if (typeof value === 'object') {\n    for (const key of ['text', 'pageContent', 'content', 'pages']) {\n      if (Object.prototype.hasOwnProperty.call(value, key)) {\n        const found = findText(value[key], depth + 1);\n        if (found) return found;\n      }\n    }\n  }\n  return '';\n}\n\nconst text = findText($json).trim();\nconst readError = text\n  ? null\n  : 'No text layer found in the PDF. It is likely a scanned image (OCR is a production-stage addition).';\n\nreturn [{\n  json: {\n    file_input: {\n      batch_id: source.batch_id,\n      file_index: source.file_index,\n      total_files: source.total_files,\n      file_name: source.file_name,\n      file_extension: 'pdf',\n      source_mime_type: source.source_mime_type || 'application/pdf',\n      text,\n      read_status: text ? 'success' : 'failed',\n      read_error: readError,\n      reported_file_size: source.reported_file_size || null,\n    },\n    text,\n    read_status: text ? 'success' : 'failed',\n    read_error: readError,\n  },\n}];"
+      },
+      "id": "1ffafdcb-a27e-46e8-b477-c86ec5d357f9",
+      "name": "Normalise PDF Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ String($json.text || '').trim().length >= 30 ? 0 : 1 }}"
+      },
+      "id": "2f4efba5-8688-416e-88e9-d7e19e34c7d8",
+      "name": "Text Quality Gate",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1400,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "inputText": "={{ ($json.text || $json.pageContent || '').slice(0, 15000) }}",
+        "categories": {
+          "categories": [
+            {
+              "category": "price_list",
+              "description": "價單 PRICE LIST — a unit catalogue: a table of units offered for sale with tower, floor, flat, saleable area, list price and price per square foot, plus payment plan and discount terms. Often titled 'PRICE LIST' or 'REVISED PRICE LIST'."
+            },
+            {
+              "category": "sales_arrangement",
+              "description": "銷售安排 SALES ARRANGEMENT — a notice stating which units are offered for sale on a specific sale date, with sales method (ballot / first-come-first-served), time and venue. Mostly prose plus a list of unit references. Often titled 'SALES ARRANGEMENT'."
+            },
+            {
+              "category": "transaction_register",
+              "description": "成交紀錄冊 REGISTER OF TRANSACTIONS — a chronological table of signed preliminary sale agreements (PASP): unit, date of PASP, transaction price, purchaser type, and remarks such as termination. Often titled 'REGISTER OF TRANSACTIONS'."
+            }
+          ]
+        }
+      },
+      "id": "6ef5a4bf-6771-4dc0-85c1-9c2c9dc8ffe3",
+      "name": "Classify Document",
+      "type": "@n8n/n8n-nodes-langchain.textClassifier",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        480
+      ],
+      "notes": "Text Classifier routes each document to exactly one of three extractors. Category descriptions ARE the prompt — keep them precise."
+    },
+    {
+      "parameters": {
+        "text": "={{ 'CONTEXT: You are an SRPE document extractor for a property development analyst team. The document is a PRICE LIST (價單): a table of units offered for sale. Extract EVERY unit row. Per unit: tower (e.g. T1), floor (e.g. 5, ignore the F suffix), flat (e.g. A), saleable_area_sqft, list_price (HKD, plain number), list_price_per_sqft. Document-level: development (project code if given, else the development name), development_name (full name EN + 中文), price_list_no (e.g. \\'1\\' or \\'3R\\'), price_list_date (YYYY-MM-DD), currency (usually HKD), payment_plan (from the payment plans section, e.g. \\'120-Day Payment Plan\\' or \\'Mortgage Payment Plan\\'). Rules: unit_key format is TOWER-FLOORF-FLAT e.g. \\'T1-5F-A\\'; dates as YYYY-MM-DD; prices as plain numbers without commas or currency symbols; missing values → null; do NOT invent units. Output ONLY valid JSON matching the schema. If the document text is only a portion (PART x of y), extract EVERY unit present in this portion and nothing more.\\n=== DOCUMENT TEXT (PART ' + (($json.chunk_index ?? 0) + 1) + ' OF ' + ($json.chunk_total ?? 1) + ') ===\\n' + ($json.text || '') }}",
+        "schemaType": "manual",
+        "inputSchema": "{\"type\": \"object\", \"properties\": {\"document_type\": {\"type\": [\"string\", \"null\"], \"enum\": [\"price_list\", null]}, \"development\": {\"type\": [\"string\", \"null\"]}, \"development_name\": {\"type\": [\"string\", \"null\"]}, \"price_list_no\": {\"type\": [\"string\", \"null\"]}, \"price_list_date\": {\"type\": [\"string\", \"null\"]}, \"currency\": {\"type\": [\"string\", \"null\"]}, \"confidence\": {\"type\": \"number\"}, \"units\": {\"type\": \"array\", \"items\": {\"type\": \"object\", \"properties\": {\"tower\": {\"type\": [\"string\", \"null\"]}, \"floor\": {\"type\": [\"string\", \"null\"]}, \"flat\": {\"type\": [\"string\", \"null\"]}, \"unit_key\": {\"type\": [\"string\", \"null\"]}, \"saleable_area_sqft\": {\"type\": [\"number\", \"null\"]}, \"list_price\": {\"type\": [\"number\", \"null\"]}, \"list_price_per_sqft\": {\"type\": [\"number\", \"null\"]}, \"payment_plan\": {\"type\": [\"string\", \"null\"]}}}}}, \"required\": [\"document_type\", \"confidence\", \"units\"]}"
+      },
+      "id": "639fca4b-5a4a-49a1-86a1-530d2b6a85e4",
+      "name": "Extract Price List",
+      "type": "@n8n/n8n-nodes-langchain.informationExtractor",
+      "typeVersion": 1.2,
+      "position": [
+        1900,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "text": "={{ 'CONTEXT: You are an SRPE document extractor for a property development analyst team. The document is a SALES ARRANGEMENT (銷售安排): a notice of which units go on sale on a specific date. Extract document-level fields: development (project code if given, else the development name), development_name (full name EN + 中文), sale_date (YYYY-MM-DD), sales_method (e.g. \\'Ballot 抽籤\\' or \\'First-come-first-served 先到先得\\'), venue, sale_time (e.g. \\'10:00 a.m.\\'), and the list of units offered for sale (tower/floor/flat per unit). Rules: unit_key format is TOWER-FLOORF-FLAT e.g. \\'T1-5F-A\\'; dates as YYYY-MM-DD; missing values → null; do NOT invent units. Output ONLY valid JSON matching the schema.\\n=== DOCUMENT TEXT ===\\n' + ($json.text || $('Read PDF').item.json.text || '') }}",
+        "schemaType": "manual",
+        "inputSchema": "{\"type\": \"object\", \"properties\": {\"document_type\": {\"type\": [\"string\", \"null\"], \"enum\": [\"sales_arrangement\", null]}, \"development\": {\"type\": [\"string\", \"null\"]}, \"development_name\": {\"type\": [\"string\", \"null\"]}, \"sale_date\": {\"type\": [\"string\", \"null\"]}, \"sales_method\": {\"type\": [\"string\", \"null\"]}, \"venue\": {\"type\": [\"string\", \"null\"]}, \"sale_time\": {\"type\": [\"string\", \"null\"]}, \"confidence\": {\"type\": \"number\"}, \"units\": {\"type\": \"array\", \"items\": {\"type\": \"object\", \"properties\": {\"tower\": {\"type\": [\"string\", \"null\"]}, \"floor\": {\"type\": [\"string\", \"null\"]}, \"flat\": {\"type\": [\"string\", \"null\"]}, \"unit_key\": {\"type\": [\"string\", \"null\"]}}}}}, \"required\": [\"document_type\", \"confidence\", \"units\"]}"
+      },
+      "id": "33b41beb-1757-4644-8421-b222a725304a",
+      "name": "Extract Sales Arrangement",
+      "type": "@n8n/n8n-nodes-langchain.informationExtractor",
+      "typeVersion": 1.2,
+      "position": [
+        1900,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "text": "={{ 'CONTEXT: You are an SRPE document extractor for a property development analyst team. The document is a REGISTER OF TRANSACTIONS (成交紀錄冊): a chronological table of signed preliminary agreements. Extract EVERY transaction row: date (YYYY-MM-DD), tower, floor, flat, price (plain number), price_per_sqft, saleable_area_sqft, purchaser_type (e.g. \\'Individual 個人買家\\' or \\'Local Company 本地公司\\'), remarks. If remarks indicate a cancelled PASP (\\'TERMINATED\\', \\'已取消\\', \\'撻訂\\'), set terminated=true. Rules: unit_key format is TOWER-FLOORF-FLAT e.g. \\'T1-5F-A\\'; prices as plain numbers without commas or currency symbols; missing values → null; do NOT invent rows. Output ONLY valid JSON matching the schema.\\n=== DOCUMENT TEXT ===\\n' + ($json.text || $('Read PDF').item.json.text || '') }}",
+        "schemaType": "manual",
+        "inputSchema": "{\"type\": \"object\", \"properties\": {\"document_type\": {\"type\": [\"string\", \"null\"], \"enum\": [\"transaction_register\", null]}, \"development\": {\"type\": [\"string\", \"null\"]}, \"development_name\": {\"type\": [\"string\", \"null\"]}, \"register_period_from\": {\"type\": [\"string\", \"null\"]}, \"register_period_to\": {\"type\": [\"string\", \"null\"]}, \"currency\": {\"type\": [\"string\", \"null\"]}, \"confidence\": {\"type\": \"number\"}, \"transactions\": {\"type\": \"array\", \"items\": {\"type\": \"object\", \"properties\": {\"date\": {\"type\": [\"string\", \"null\"]}, \"tower\": {\"type\": [\"string\", \"null\"]}, \"floor\": {\"type\": [\"string\", \"null\"]}, \"flat\": {\"type\": [\"string\", \"null\"]}, \"unit_key\": {\"type\": [\"string\", \"null\"]}, \"price\": {\"type\": [\"number\", \"null\"]}, \"price_per_sqft\": {\"type\": [\"number\", \"null\"]}, \"saleable_area_sqft\": {\"type\": [\"number\", \"null\"]}, \"purchaser_type\": {\"type\": [\"string\", \"null\"]}, \"remarks\": {\"type\": [\"string\", \"null\"]}, \"terminated\": {\"type\": [\"boolean\", \"null\"]}}}}}, \"required\": [\"document_type\", \"confidence\", \"transactions\"]}"
+      },
+      "id": "40ef7bc3-2799-4e01-9ba2-d6fe338d4ab3",
+      "name": "Extract Transaction Register",
+      "type": "@n8n/n8n-nodes-langchain.informationExtractor",
+      "typeVersion": 1.2,
+      "position": [
+        1900,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash",
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "id": "a03cf318-572f-40f7-b416-342e60d5fe15",
+      "name": "Gemini Chat Model - Classify & Extract",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        1900,
+        960
+      ],
+      "notes": "ONE shared model sub-node feeds the classifier and all three extractors (ai_languageModel). Credential baked in: FA-03's '[JJ Paid] Gemini' (id vopaH2LdgdwdL832 — the same one the live FA-03 workflow uses). Swap the model from the dropdown if this preview model is unavailable.",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "vopaH2LdgdwdL832",
+          "name": "[JJ Paid] Gemini"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "a513ffb2-afc0-4b84-9269-a91441eeeed2",
+      "name": "Pass Unreadable to Review",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst item = $input.first().json;\n// Information Extractor outputs { output: <parsed JSON> } and DROPS the input\n// metadata; the noOp path passes the raw file item through. Normalise both.\nconst ex = item.output || item;\nconst f = item.file_input || {};\n// Metadata fallback: Split Uploaded Files is an ancestor of every loop branch\n// (resolves per-iteration inside splitInBatches). Wrap for the noOp path.\nlet meta = {};\ntry { meta = $('Split Uploaded Files').item.json || {}; } catch (e) {}\ntry { if (!meta.batch_id && $('Normalise PDF Text').item.json.file_input) meta = $('Normalise PDF Text').item.json.file_input; } catch (e) {}\nconst batch_id = f.batch_id || item.batch_id || meta.batch_id || '';\nconst file_name = f.file_name || item.file_name || meta.file_name || 'unknown';\nconst file_index = f.file_index ?? item.file_index ?? meta.file_index ?? 0;\nconst file_extension = f.file_extension || item.file_extension || meta.file_extension || '';\n\nconst SDV2 = $getWorkflowStaticData('global');\nconst WATCH = (SDV2.pd02_v2 && SDV2.pd02_v2.watchlist) || {};\nconst MASTER = {};\nfor (const [devId, d] of Object.entries(WATCH)) {\n  MASTER[devId] = {\n    name_en: d.name_en || '', name_zh: d.name_zh || '', phase: d.phase_en || '',\n    aliases: [d.name_en, d.name_zh, d.phase_en, d.phase_zh, d.district_en, d.district_zh].filter(Boolean),\n  };\n}\nconst NORM = s => String(s || '').toUpperCase().replace(/[^A-Z0-9\\u4e00-\\u9fff]+/g, '');\nconst normPhase = s => NORM(s).replace(/(PHASE|PH)\\d*/g, '').replace(/第\\d+期/g, '');\n\nconst normKey = (tower, floor, flat) => {\n  const t = String(tower || '').toUpperCase().replace(/[^A-Z0-9]/g, '') || '?';\n  const fl = String(floor || '').toUpperCase().replace(/[^0-9]/g, '') || '?';\n  const fa = String(flat || '').toUpperCase().replace(/[^A-Z0-9]/g, '') || '?';\n  return `${t}-${fl}F-${fa}`;\n};\nconst num = v => { const n = Number(v); return Number.isFinite(n) ? n : null; };\nconst blank = v => (v === null || v === undefined || String(v).trim() === '') ? null : String(v).trim();\n\n// --- REVIEW pass-through: unreadable scan / unsupported format ------------------\nif (!ex.document_type && !ex.units && !ex.transactions) {\n  const reasons = [];\n  if (f.read_error) reasons.push(f.read_error);\n  if (file_extension && file_extension !== 'pdf') reasons.push(`Unsupported format: .${file_extension}`);\n  if (!reasons.length) reasons.push('Document could not be classified or extracted.');\n  return [{ json: {\n    batch_id,\n    file_index,\n    file_name,\n    doc_type: null,\n    development: null, development_name: null,\n    confidence: null,\n    doc_status: 'REVIEW',\n    review_reasons: reasons,\n    ai_guess: null,\n    warnings: reasons,\n    units: [],\n    extracted_at: new Date().toISOString(),\n  } }];\n}\n\nconst docType = String(ex.document_type || '').trim();\nlet rawUnits = [];\nif (docType === 'price_list') {\n  rawUnits = (Array.isArray(ex.units) ? ex.units : []).map(u => ({\n    tower: blank(u.tower), floor: blank(u.floor), flat: blank(u.flat),\n    saleable_area_sqft: num(u.saleable_area_sqft), list_price: num(u.list_price),\n    list_price_per_sqft: num(u.list_price_per_sqft), payment_plan: blank(u.payment_plan),\n    status: 'offered',\n  }));\n} else if (docType === 'sales_arrangement') {\n  rawUnits = (Array.isArray(ex.units) ? ex.units : []).map(u => ({\n    tower: blank(u.tower), floor: blank(u.floor), flat: blank(u.flat),\n    sale_date: blank(ex.sale_date), sales_method: blank(ex.sales_method),\n    status: 'selling',\n  }));\n} else if (docType === 'transaction_register') {\n  rawUnits = (Array.isArray(ex.transactions) ? ex.transactions : []).map(t => ({\n    tower: blank(t.tower), floor: blank(t.floor), flat: blank(t.flat),\n    saleable_area_sqft: num(t.saleable_area_sqft), transaction_date: blank(t.date),\n    transaction_price: num(t.price), price_per_sqft: num(t.price_per_sqft),\n    purchaser_type: blank(t.purchaser_type), remarks: blank(t.remarks),\n    status: t.terminated === true || /terminat|cancel|已取消|撻訂/i.test(String(t.remarks || '')) ? 'terminated' : 'sold',\n  }));\n}\n\n// --- Development matching against the watchlist (names + aliases) ---------------\nconst docDevName = blank(ex.development_name) || blank(ex.development);\nlet development = null;\nlet developmentName = null;\nif (docDevName) {\n  // Containment matching: extractor output varies ('HARBOUR VISTA 凱港峰 PHASE 1',\n  // 'Harbour Vista Ph.1', '凱港峰' ...). Strip phase markers, then match either direction.\n  const docN = normPhase(docDevName);\n  for (const [code, dev] of Object.entries(MASTER)) {\n    const names = [dev.name_en, dev.name_zh, ...(dev.aliases || [])].map(normPhase).filter(Boolean);\n    const hit = names.some(n => docN === n || (n.length >= 4 && (docN.includes(n) || n.includes(docN))));\n    if (hit) {\n      development = code;\n      developmentName = `${dev.name_en} ${dev.name_zh} ${dev.phase}`;\n      break;\n    }\n  }\n}\n\n// --- Watchlist override: the monitor flow already knows the development ---\ntry {\n  const ov = SDV2.pd02_v2 && SDV2.pd02_v2.file_meta && SDV2.pd02_v2.file_meta[batch_id]\n    && SDV2.pd02_v2.file_meta[batch_id][file_name];\n  if (ov && ov.development) {\n    development = ov.development;\n    developmentName = ov.development_name;\n  }\n} catch (e) {}\n\nconst confidence = num(ex.confidence);\nconst warnings = [];\nif (confidence !== null && confidence < 0.9) warnings.push('Low confidence: manual confirmation required.');\nif (!rawUnits.length) warnings.push('No units could be extracted from this document.');\n\nconst reviewReasons = [];\nif (!development) reviewReasons.push(`Development not in watchlist${docDevName ? ` (best guess: ${docDevName})` : ''}.`);\nif (confidence !== null && confidence < 0.7) reviewReasons.push(`Low extraction confidence (${Math.round(confidence * 100)}%).`);\nif (f.read_error) reviewReasons.push(f.read_error);\n\nconst units = [];\nconst seen = new Set();\nfor (const u of rawUnits) {\n  const uk = normKey(u.tower, u.floor, u.flat);\n  const dupKey = `${uk}|${u.transaction_date || u.sale_date || ''}`;\n  if (seen.has(dupKey)) continue;   // duplicate row inside one document\n  seen.add(dupKey);\n  units.push({ ...u, unit_key: uk, source_file: file_name });\n}\n\nreturn [{ json: {\n  batch_id,\n  file_index,\n  file_name,\n  doc_type: docType,\n  development, development_name: developmentName,\n  confidence,\n  doc_status: reviewReasons.length ? 'REVIEW' : 'PROCESSED',\n  review_reasons: reviewReasons,\n  ai_guess: (reviewReasons.length && docDevName)\n    ? { development: docDevName, reason: 'Development name did not match the watchlist master data.' }\n    : null,\n  warnings,\n  units,\n  extracted_at: new Date().toISOString(),\n} }];"
+      },
+      "id": "4693d532-1ce9-4a5f-894c-21bc36ecfa7f",
+      "name": "Match & Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        480
+      ],
+      "notes": "Code #1 — deterministic, zero LLM cost: development matching vs watchlist (names + aliases), confidence gates (<0.7 -> REVIEW), unit_key normalisation, per-document duplicate rows."
+    },
+    {
+      "parameters": {
+        "jsCode": "const record = $input.first().json;\nconst batchId = String(record.batch_id || '');\nif (!batchId) throw new Error('Processed record is missing batch_id.');\nconst sd = $getWorkflowStaticData('global');\nconst batch = sd.pd02_v1?.batches?.[batchId];\nif (!batch) return [{ json: { ...record, persisted: false, reason: 'Batch not found' } }];\nbatch.records = batch.records || [];\nbatch.records = batch.records.filter(r => r.file_name !== record.file_name);\nbatch.records.push(record);\nbatch.processed_files = batch.records.length;\nbatch.updated_at = new Date().toISOString();\nreturn [{ json: { ...record, persisted: true } }];"
+      },
+      "id": "b17998ce-bc1d-4fac-99de-c4fd167aa91d",
+      "name": "Persist Processed File",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// \"Run Once for All Items\": every file's record arrives here after the loop.\nconst records = $input.all().map(i => i.json).filter(r => r && r.file_name);\nconst batchId = records[0]?.batch_id || '';\n\nconst SDV2 = $getWorkflowStaticData('global');\nconst WATCH = (SDV2.pd02_v2 && SDV2.pd02_v2.watchlist) || {};\nconst MASTER = {};\nfor (const [devId, d] of Object.entries(WATCH)) {\n  MASTER[devId] = {\n    name_en: d.name_en || '', name_zh: d.name_zh || '', phase: d.phase_en || '',\n    aliases: [d.name_en, d.name_zh, d.phase_en, d.phase_zh, d.district_en, d.district_zh].filter(Boolean),\n  };\n}\nconst FUNNEL = { sold: 3, terminated: 3, selling: 2, offered: 1 };\nconst units = new Map();          // `${development}|${unit_key}` -> current state\nconst reviewQueue = [];\nlet duplicatesDetected = 0;\nlet unlistedCount = 0;\nconst dupQueueFiles = new Set(); // one queue entry per duplicate FILE, not per unit\n\n// Latest price-list revision per development (No.3R supersedes No.3).\nconst plByDev = {};\nfor (const r of records) {\n  if (r.doc_type === 'price_list' && r.development) {\n    plByDev[r.development] = plByDev[r.development] || [];\n    plByDev[r.development].push(r);\n  }\n}\nfor (const pls of Object.values(plByDev)) {\n  pls.sort((a, b) => (/R/i.test(a.price_list_no || '') ? 1 : 0) - (/R/i.test(b.price_list_no || '') ? 1 : 0));\n}\n\nfor (const r of records) {\n  if (r.doc_status === 'REVIEW' || !r.development) {\n    reviewQueue.push({\n      file_name: r.file_name,\n      doc_type: r.doc_type || 'unreadable',\n      development: r.development || null,\n      development_name: r.development_name || null,\n      confidence: r.confidence ?? null,\n      review_reasons: r.review_reasons?.length ? r.review_reasons : ['Development not matched or document unreadable.'],\n      ai_guess: r.ai_guess,\n    });\n    continue;\n  }\n  const plsForDev = plByDev[r.development] || [];\n  const currentPl = plsForDev[plsForDev.length - 1] || null;\n  const onCurrentPl = u => currentPl && (currentPl.units || []).some(x => x.unit_key === u.unit_key);\n\n  for (const u of (r.units || [])) {\n    const key = `${r.development}|${u.unit_key}`;\n    const entry = {\n      unit_key: u.unit_key, tower: u.tower, floor: u.floor, flat: u.flat,\n      development: r.development, development_name: r.development_name,\n      saleable_area_sqft: u.saleable_area_sqft ?? null,\n      list_price: u.list_price ?? null, list_price_per_sqft: u.list_price_per_sqft ?? null,\n      payment_plan: u.payment_plan ?? null,\n      sale_date: u.sale_date ?? null, sales_method: u.sales_method ?? null,\n      transaction_date: u.transaction_date ?? null, transaction_price: u.transaction_price ?? null,\n      price_per_sqft: u.price_per_sqft ?? null, purchaser_type: u.purchaser_type ?? null,\n      status: u.status,\n      source_file: r.file_name, source_doc_type: r.doc_type,\n      confidence: r.confidence ?? null,\n      duplicate_of: null, unlisted_unit: false, superseded_by: null,\n      history: [],\n    };\n\n    // DUPLICATE: same doc type + same unit + same event date (e.g. register grabbed twice).\n    const prev = units.get(key);\n    if (prev && prev.source_doc_type === r.doc_type && (prev.transaction_date || prev.sale_date) === (u.transaction_date || u.sale_date)) {\n      duplicatesDetected += 1;\n      prev.duplicate_of = prev.duplicate_of || prev.source_file;\n      if (!dupQueueFiles.has(r.file_name)) {\n        dupQueueFiles.add(r.file_name);\n        reviewQueue.push({\n          file_name: r.file_name, doc_type: r.doc_type, development: r.development,\n          review_reasons: [`Duplicate of ${prev.source_file} — same ${r.doc_type} for ${u.unit_key} on same date. Not double-counted.`],\n          ai_guess: null, duplicate: true,\n        });\n      }\n      continue;\n    }\n\n    if (!prev) {\n      // Register-only unit never seen on a price list -> flag (staff sales happen).\n      if (r.doc_type === 'transaction_register' && !plsForDev.some(p => (p.units || []).some(x => x.unit_key === u.unit_key))) {\n        entry.unlisted_unit = true;\n        unlistedCount += 1;\n      }\n      units.set(key, entry);\n      continue;\n    }\n\n    const prevOrder = FUNNEL[prev.status] || 0;\n    const newOrder = FUNNEL[u.status] || 0;\n    if (newOrder > prevOrder) {\n      // Funnel rule: sold/terminated beats selling beats offered. Latest truth wins.\n      prev.history.push({\n        status: prev.status, date: prev.transaction_date || prev.sale_date || null,\n        price: prev.transaction_price ?? prev.list_price ?? null, source_file: prev.source_file,\n      });\n      for (const k of ['sale_date', 'sales_method', 'transaction_date', 'transaction_price',\n                       'price_per_sqft', 'purchaser_type', 'saleable_area_sqft', 'list_price',\n                       'list_price_per_sqft', 'payment_plan', 'status', 'source_file',\n                       'source_doc_type', 'confidence']) {\n        if (entry[k] !== undefined && entry[k] !== null) prev[k] = entry[k];\n      }\n      if (r.doc_type === 'transaction_register' && !onCurrentPl(u) && !prev.unlisted_unit) {\n        prev.unlisted_unit = true;\n        unlistedCount += 1;\n      }\n    } else {\n      // Same or earlier funnel stage: only fill missing catalogue data (order-independent).\n      if (prev.status === 'offered' && u.status === 'offered' && u.list_price != null) {\n        prev.list_price = u.list_price;                    // revised price list wins\n        prev.list_price_per_sqft = u.list_price_per_sqft ?? prev.list_price_per_sqft;\n        prev.payment_plan = u.payment_plan ?? prev.payment_plan;\n        if (prev.source_file !== r.file_name) prev.superseded_by = r.file_name;\n      } else {\n        if (prev.list_price == null && u.list_price != null) prev.list_price = u.list_price;\n        if (prev.saleable_area_sqft == null && u.saleable_area_sqft != null) prev.saleable_area_sqft = u.saleable_area_sqft;\n      }\n      prev.history.push({\n        status: u.status, date: u.transaction_date || u.sale_date || null,\n        price: u.transaction_price ?? u.list_price ?? null, source_file: r.file_name,\n      });\n    }\n  }\n}\n\n// ---- stats ----------------------------------------------------------------------\nconst unitList = [...units.values()];\nconst soldUnits = unitList.filter(u => u.status === 'sold');\nconst stats = {\n  documents_processed: records.length,\n  documents_reviewed: reviewQueue.length,\n  duplicates_detected: duplicatesDetected,\n  duplicate_files: dupQueueFiles.size,\n  unlisted_units: unlistedCount,\n  sold_total: soldUnits.length,\n  terminated_total: unitList.filter(u => u.status === 'terminated').length,\n  per_development: {},\n};\nconst allSumPrice = soldUnits.reduce((s, u) => s + (u.transaction_price || 0), 0);\nconst allSumArea = soldUnits.reduce((s, u) => s + (u.saleable_area_sqft || 0), 0);\nlet totalBase = 0;\nfor (const code of Object.keys(MASTER)) {\n  const devUnits = unitList.filter(u => u.development === code);\n  const offered = devUnits.filter(u => u.status === 'offered').length;\n  const selling = devUnits.filter(u => u.status === 'selling').length;\n  const sold = devUnits.filter(u => u.status === 'sold').length;\n  const terminated = devUnits.filter(u => u.status === 'terminated').length;\n  const base = offered + selling + sold + terminated;       // full catalogue size\n  totalBase += base;\n  const soldSub = devUnits.filter(u => u.status === 'sold');\n  const sumPrice = soldSub.reduce((s, u) => s + (u.transaction_price || 0), 0);\n  const sumArea = soldSub.reduce((s, u) => s + (u.saleable_area_sqft || 0), 0);\n  stats.per_development[code] = {\n    development_name: `${MASTER[code].name_en} ${MASTER[code].name_zh} ${MASTER[code].phase}`,\n    offered, selling, sold, terminated,\n    take_up_pct: base ? Math.round((sold / base) * 1000) / 10 : 0,\n    avg_price_psf: sumArea ? Math.round(sumPrice / sumArea) : null,\n    avg_transaction_price: soldSub.length ? Math.round(sumPrice / soldSub.length) : null,\n  };\n}\nstats.take_up_pct = totalBase ? Math.round((stats.sold_total / totalBase) * 1000) / 10 : 0;\nstats.avg_price_psf = allSumArea ? Math.round(allSumPrice / allSumArea) : null;\nstats.avg_transaction_price = soldUnits.length ? Math.round(allSumPrice / soldUnits.length) : null;\n\n// persist into the batch (frontend endpoints read from here)\nconst sd = $getWorkflowStaticData('global');\nconst batch = sd.pd02_v1?.batches?.[batchId];\nif (batch) {\n  batch.units = unitList;\n  batch.review_queue = reviewQueue;\n  batch.stats = stats;\n  batch.updated_at = new Date().toISOString();\n}\n\nreturn [{ json: { batch_id: batchId, units: unitList, review_queue: reviewQueue, stats } }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "6ec94328-f294-42f0-bfef-879a64dc90ac",
+      "name": "Reconcile Unit Records",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2700,
+        480
+      ],
+      "notes": "Code #2 — 'Run Once for All Items'. The Business Plan's 'human judgement -> rule based' demand, in code: sold/terminated > selling > offered; duplicate detection; revised price list wins; unlisted units flagged. Outputs unit_records + review queue + stats."
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nreturn (data.units || []).map(u => ({ json: {\n  unit_key: u.unit_key, development: u.development, development_name: u.development_name,\n  tower: u.tower, floor: u.floor, flat: u.flat,\n  saleable_area_sqft: u.saleable_area_sqft, list_price: u.list_price,\n  list_price_per_sqft: u.list_price_per_sqft, payment_plan: u.payment_plan,\n  sale_date: u.sale_date, sales_method: u.sales_method,\n  transaction_date: u.transaction_date, transaction_price: u.transaction_price,\n  price_per_sqft: u.price_per_sqft, purchaser_type: u.purchaser_type,\n  status: u.status, source_file: u.source_file,\n  unlisted_unit: u.unlisted_unit === true, duplicate_of: u.duplicate_of,\n} }));"
+      },
+      "id": "0f628b08-f557-4d6c-9be1-c849e7d48507",
+      "name": "Split Units for Table",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2900,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "unit_records",
+          "mode": "name",
+          "cachedResultName": "unit_records"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": null
+        }
+      },
+      "id": "a519b522-7eb2-4a6f-b75a-b2d56abd4bbf",
+      "name": "Save to unit_records Table",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        3100,
+        480
+      ],
+      "notes": "n8n Data Table — the shared unit_records table REA-02 also reads. Schema verified against n8n source (DataTable v1): resource 'row', operation 'insert', dataTableId RL, columns.mappingMode 'autoMapInputData' (= Map Automatically). continueOnFail keeps the demo pipeline alive if the table is missing.",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// \"Run Once for All Items\". Deterministic arithmetic + HTML — no LLM on the numbers.\nconst data = $('Reconcile Unit Records').item.json;\nconst batchId = data.batch_id || '';\nconst units = data.units || [];\nconst reviewQueue = data.review_queue || [];\nconst stats = data.stats || {};\nconst dev = stats.per_development || {};\n\nconst hkf = n => n == null ? '—' : 'HK$' + Number(n).toLocaleString('en-HK');\nconst hknum = n => n == null ? '—' : Number(n).toLocaleString('en-HK');\nconst pct = n => n == null ? '—' : Number(n) + '%';\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\n// --- weekly trend: ISO week per transaction date --------------------------------\nconst isoWeek = d => {\n  const date = new Date(d + 'T00:00:00Z');\n  const day = (date.getUTCDay() + 6) % 7;\n  date.setUTCDate(date.getUTCDate() - day + 3);\n  const firstThursday = new Date(Date.UTC(date.getUTCFullYear(), 0, 4));\n  const fDay = (firstThursday.getUTCDay() + 6) % 7;\n  firstThursday.setUTCDate(firstThursday.getUTCDate() - fDay + 3);\n  const week = 1 + Math.round((date - firstThursday) / (7 * 24 * 3600 * 1000));\n  return `W${week} ${date.getUTCFullYear()}`;\n};\nconst trend = {};\nfor (const u of units) {\n  if (u.status === 'sold' && u.transaction_date) {\n    const w = isoWeek(u.transaction_date);\n    trend[w] = (trend[w] || 0) + 1;\n  }\n}\nconst trendLabels = Object.keys(trend).sort();\nconst trendValues = trendLabels.map(w => trend[w]);\n\n// --- unit mix by flat size band --------------------------------------------------\nconst bands = { '<300': 0, '300–500': 0, '>500': 0 };\nfor (const u of units) {\n  if (u.status !== 'sold' || !u.saleable_area_sqft) continue;\n  const a = u.saleable_area_sqft;\n  if (a < 300) bands['<300'] += 1;\n  else if (a <= 500) bands['300–500'] += 1;\n  else bands['>500'] += 1;\n}\n\n// --- KPI cards -------------------------------------------------------------------\nconst kpis = [\n  ['Units sold this week', String(stats.sold_total ?? 0), '週內成交單位'],\n  ['Take-up', pct(stats.take_up_pct), '已售比例'],\n  ['Avg price / sq ft', stats.avg_price_psf == null ? '—' : 'HK$' + hknum(stats.avg_price_psf), '平均呎價'],\n  ['Terminations', String(stats.terminated_total ?? 0), '撻訂'],\n  ['Documents processed', String(stats.documents_processed ?? 0), '處理文件'],\n];\nconst kpiHtml = kpis.map(([t, v, zh]) => `\n  <div class=\"kpi\"><div class=\"kpi-label\">${t} ${zh}</div><div class=\"kpi-value\">${v}</div></div>`).join('');\n\n// --- per-development funnel data --------------------------------------------------\nconst devCodes = Object.keys(dev);\nconst funnelLabels = devCodes.map(c => esc(dev[c].development_name));\nconst funnelOffered = devCodes.map(c => dev[c].offered);\nconst funnelSelling = devCodes.map(c => dev[c].selling);\nconst funnelSold = devCodes.map(c => dev[c].sold);\n\n// --- transaction detail table -----------------------------------------------------\nconst soldRows = units\n  .filter(u => u.status === 'sold' || u.status === 'terminated')\n  .sort((a, b) => (a.development || '').localeCompare(b.development || '') || (a.transaction_date || '').localeCompare(b.transaction_date || ''));\nconst tableHtml = soldRows.map(u => `\n  <tr>\n    <td>${esc(u.development_name || u.development)}</td>\n    <td class=\"mono\">${esc(u.unit_key)}</td>\n    <td class=\"num\">${hknum(u.saleable_area_sqft)}</td>\n    <td class=\"num\">${hknum(u.transaction_price)}</td>\n    <td class=\"num\">${hknum(u.price_per_sqft)}</td>\n    <td>${esc(u.transaction_date || '—')}</td>\n    <td>${esc(u.purchaser_type || '—')}</td>\n    <td>${u.status === 'terminated' ? '<span class=\"badge term\">TERMINATED</span>' : '<span class=\"badge sold\">SOLD</span>'}</td>\n  </tr>`).join('') || '<tr><td colspan=\"8\" class=\"muted\">No transactions this week.</td></tr>';\n\n// --- review queue -----------------------------------------------------------------\nconst reviewHtml = reviewQueue.map(r => `\n  <div class=\"review-card\">\n    <div class=\"rc-head\"><strong>${esc(r.file_name)}</strong>\n      ${r.duplicate ? '<span class=\"badge dup\">DUPLICATE</span>' : '<span class=\"badge review\">REVIEW</span>'}</div>\n    <div class=\"rc-body\">\n      ${(r.review_reasons || []).map(x => `<div>• ${esc(x)}</div>`).join('')}\n      ${r.ai_guess ? `<div class=\"rc-guess\">AI guess: ${esc(r.ai_guess.development || '')} — ${esc(r.ai_guess.reason || '')}</div>` : ''}\n    </div>\n  </div>`).join('') || '<p class=\"muted\">Review queue is empty — everything matched.</p>';\n\nconst chartScript = `\n  const funnel = document.getElementById('funnel');\n  if (funnel) new Chart(funnel, {\n    type: 'bar',\n    data: { labels: ${JSON.stringify(funnelLabels)}, datasets: [\n      { label: 'Offered', data: ${JSON.stringify(funnelOffered)}, backgroundColor: '#b98a99' },\n      { label: 'Selling', data: ${JSON.stringify(funnelSelling)}, backgroundColor: '#8a1a3a' },\n      { label: 'Sold', data: ${JSON.stringify(funnelSold)}, backgroundColor: '#5e1023' }\n    ]},\n    options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }\n  });\n  const trend = document.getElementById('trend');\n  if (trend) new Chart(trend, {\n    type: 'bar',\n    data: { labels: ${JSON.stringify(trendLabels)}, datasets: [{ label: 'Units sold', data: ${JSON.stringify(trendValues)}, backgroundColor: '#7b1530' }] },\n    options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } }, plugins: { legend: { display: false } } }\n  });\n  const mix = document.getElementById('mix');\n  if (mix) new Chart(mix, {\n    type: 'doughnut',\n    data: { labels: ${JSON.stringify(Object.keys(bands))}, datasets: [{ data: ${JSON.stringify(Object.values(bands))}, backgroundColor: ['#b8860b', '#7b1530', '#c05a72'] }] },\n    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }\n  });`;\n\nconst generatedAt = new Date().toISOString().replace('T', ' ').slice(0, 16);\nconst html = `<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>PD-02 Weekly Report — ${stats.sold_total ?? 0} sold</title>\n<script src=\"https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js\"><\\/script>\n<style>\n  :root{--font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;\n    --bg:#f6f2f3;--surface:#fff;--ink:#2b1a20;--muted:#7a6a70;--line:#e8dde0;\n    --navy:#5e1023;--gold:#b8860b;--blue:#7b1530;--teal:#0f8778;--green:#1d7a4a;--amber:#a65c00;--red:#b33a3a;}\n  *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-family);font-size:14px;line-height:1.5}\n  header{background:linear-gradient(135deg,#4a0d1f 0%,#7b1530 55%,#a02747 100%);color:#fff;padding:26px 34px}\n  header h1{margin:0;font-size:20px;letter-spacing:.2px}\n  header .sub{opacity:.85;font-size:12.5px;margin-top:4px}\n  header .meta{opacity:.65;font-size:11.5px;margin-top:8px}\n  main{padding:26px 34px;max-width:1200px;margin:0 auto}\n  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:22px}\n  .kpi{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:0 8px 24px rgba(25,42,70,.06)}\n  .kpi-label{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}\n  .kpi-value{font-size:26px;font-weight:700;margin-top:6px;font-variant-numeric:tabular-nums}\n  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}\n  @media(max-width:900px){.grid{grid-template-columns:1fr}}\n  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:14px;box-shadow:0 8px 24px rgba(25,42,70,.06)}\n  .card h3{margin:0 0 12px;font-size:13.5px;color:var(--navy);text-transform:uppercase;letter-spacing:.5px}\n  .chart-wrap{position:relative;height:260px}\n  table{width:100%;border-collapse:collapse;font-size:12.5px}\n  th{background:#eef2f7;text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);position:sticky;top:0}\n  td{padding:7px 10px;border-top:1px solid var(--line);font-variant-numeric:tabular-nums}\n  .num{text-align:right}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}\n  .badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:10.5px;font-weight:600;letter-spacing:.4px}\n  .badge.sold{background:#eaf7ef;color:var(--green)}.badge.term{background:#fff0f0;color:var(--red)}\n  .badge.review{background:#fff4df;color:var(--amber)}.badge.dup{background:#eaf1ff;color:var(--blue)}\n  .review-card{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;background:#fffdf8}\n  .rc-head{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:6px}\n  .rc-body{font-size:12.5px;color:#4a5468}.rc-guess{margin-top:6px;color:var(--amber);font-size:12px}\n  .muted{color:var(--muted)}.tbl-wrap{overflow:auto;max-height:420px}\n  footer{color:var(--muted);font-size:11.5px;padding:10px 34px 30px;max-width:1200px;margin:0 auto}\n</style>\n</head>\n<body>\n<header>\n  <h1>Great Eagle Group — Weekly New Residential Sales Report 每周新盤成交報告</h1>\n  <div class=\"sub\">Week 31 (21–27 Jul 2025) · SRPE data pipeline · generated ${generatedAt}</div>\n  <div class=\"meta\">Auto-generated by n8n — no manual edits. Source: unit_records table (shared with REA-02).</div>\n</header>\n<main>\n  <div class=\"kpis\">${kpiHtml}</div>\n  <div class=\"grid\">\n    <div class=\"card\"><h3>Funnel — offered / selling / sold</h3><div class=\"chart-wrap\"><canvas id=\"funnel\"></canvas></div></div>\n    <div class=\"card\"><h3>Weekly trend — units sold</h3><div class=\"chart-wrap\"><canvas id=\"trend\"></canvas></div></div>\n  </div>\n  <div class=\"card\"><h3>Unit mix — sold by flat size band</h3><div class=\"chart-wrap\" style=\"height:220px\"><canvas id=\"mix\"></canvas></div></div>\n  <div class=\"card\">\n    <h3>Transaction detail — this week (${soldRows.length} rows)</h3>\n    <div class=\"tbl-wrap\"><table>\n      <thead><tr><th>Development</th><th>Unit</th><th class=\"num\">Area sq ft</th><th class=\"num\">Price HK$</th><th class=\"num\">$/sq ft</th><th>Date</th><th>Purchaser</th><th>Status</th></tr></thead>\n      <tbody>${tableHtml}</tbody>\n    </table></div>\n  </div>\n  <div class=\"card\"><h3>Review queue — needs human eyes (${reviewQueue.length})</h3>${reviewHtml}</div>\n</main>\n<footer>\n  Pipeline: SRPE documents → classify → extract → reconcile (funnel rule: sold &gt; selling &gt; offered) → report.\n  Numbers are computed by deterministic code, not by a language model. Week-over-week trend accumulates in the unit_records table.\n</footer>\n<script>${chartScript}<\\/script>\n</body>\n</html>`;\n\n// chart datasets are injected separately (kept above as a placeholder-free template)\nconst sd = $getWorkflowStaticData('global');\nconst batch = sd.pd02_v1?.batches?.[batchId];\nif (batch) {\n  batch.weekly_report_html = html;\n  batch.updated_at = new Date().toISOString();\n}\nreturn [{ json: { batch_id: batchId, report_chars: html.length, sold_total: stats.sold_total ?? 0 } }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "73126d47-11cf-4e30-b088-05435c4f3d65",
+      "name": "Build Weekly Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        480
+      ],
+      "notes": "Code #3 — deterministic HTML report (Chart.js CDN). Numbers come from the reconciled table, not from a language model: zero hallucination risk on management figures."
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst batchId = String(data.batch_id || '');\nconst sd = $getWorkflowStaticData('global');\nconst batch = sd.pd02_v1?.batches?.[batchId];\nif (!batch) return [{ json: { batch_id: batchId, status: 'not_found', _status: 404 } }];\nbatch.status = 'complete';\nbatch.updated_at = new Date().toISOString();\nreturn [{ json: { batch_id: batchId, status: 'complete', processed_files: batch.processed_files, total_files: batch.total_files } }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "e9200c62-4434-4514-9238-beaa055c9b90",
+      "name": "Mark Batch Complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3500,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "pd02/batch-status",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a53273e2-37ae-4836-8c50-dc33a6775976",
+      "name": "GET pd02/batch-status",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const query = $json.query || {};\nconst batchId = String(query.batch_id || '').trim();\nconst sd = $getWorkflowStaticData('global');\nconst batch = sd.pd02_v1?.batches?.[batchId];\nif (!batch) return [{ json: { ok: false, error: 'Batch not found', batch_id: batchId, _status: 404 } }];\nconst records = Array.isArray(batch.records) ? batch.records : [];\nreturn [{ json: {\n  ok: true,\n  batch_id: batch.batch_id,\n  status: batch.status,\n  created_at: batch.created_at,\n  updated_at: batch.updated_at,\n  total_files: batch.total_files,\n  processed_files: batch.processed_files,\n  documents: records.map(r => ({\n    file_name: r.file_name,\n    doc_type: r.doc_type || 'unknown',\n    development: r.development,\n    development_name: r.development_name,\n    doc_status: r.doc_status,\n    confidence: r.confidence ?? null,\n    warning_count: (r.warnings || []).length,\n    unit_count: (r.units || []).length,\n  })),\n  stats: batch.stats || null,\n  _status: 200,\n} }];"
+      },
+      "id": "57584660-3578-4045-96d8-ff60716c575a",
+      "name": "Read Batch Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": "={{ $json._status || 200 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "id": "4edd3492-1c6f-4fa9-9505-19e9e94b3a1f",
+      "name": "Respond Batch Status",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        400,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "pd02/units",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "94f9d7a3-d37e-4cea-9903-ad9596036fe2",
+      "name": "GET pd02/units",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        1080
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const query = $json.query || {};\nconst batchId = String(query.batch_id || '').trim();\nconst sd = $getWorkflowStaticData('global');\nconst batch = sd.pd02_v1?.batches?.[batchId];\nif (!batch) return [{ json: { ok: false, error: 'Batch not found', batch_id: batchId, _status: 404 } }];\nreturn [{ json: {\n  ok: true,\n  batch_id: batch.batch_id,\n  units: batch.units || [],\n  review_queue: batch.review_queue || [],\n  stats: batch.stats || null,\n  _status: 200,\n} }];"
+      },
+      "id": "54fdabd0-ff32-42f8-8bdd-2af4047507a3",
+      "name": "Read Unit Records",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        1080
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": "={{ $json._status || 200 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "id": "3d419bb8-9d57-4b9c-af7a-645b52243273",
+      "name": "Respond Unit Records",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        400,
+        1080
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "pd02/report",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "7f7c838e-795b-4366-9117-a27cb509e5f6",
+      "name": "GET pd02/report",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        1260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const query = $json.query || {};\nconst batchId = String(query.batch_id || '').trim();\nconst sd = $getWorkflowStaticData('global');\nconst batch = sd.pd02_v1?.batches?.[batchId];\nif (!batch) return [{ json: { ok: false, error: 'Batch not found', batch_id: batchId, _status: 404 } }];\nreturn [{ json: {\n  ok: true,\n  html: batch.weekly_report_html || '<html><body style=\"font-family:sans-serif\"><h2>Report not ready yet</h2><p>The batch has not finished processing. Try again in a minute.</p></body></html>',\n  _status: 200,\n} }];"
+      },
+      "id": "9fb1aa2c-fa0e-46f1-a106-29e5322ae644",
+      "name": "Read Weekly Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        1260
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseCode": "={{ $json._status || 200 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "id": "4fa45a53-6976-43fe-94be-c1c4463ceb6c",
+      "name": "Respond Weekly Report",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        400,
+        1260
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## PD-02 Weekly SRPE Sales Reporting (v1.0)\nPOST `pd02/intake` (multipart upload, answers 202) -> per-file loop:\nFile Type Router -> Read PDF -> Text Quality Gate -> Text Classifier\n-> 3 x Information Extractor (one shared Gemini model) -> Match & Validate\nAfter the loop: Reconcile (funnel rule) -> unit_records Data Table -> Weekly Report HTML\nRead endpoints: GET `pd02/batch-status`, `pd02/units`, `pd02/report`.\nSpec: 01_Docs/PD-02 Weekly SRPE Sales Reporting — FDE Demo Design Spec.md",
+        "width": 420,
+        "height": 230,
+        "color": 3
+      },
+      "id": "5c42ab26-ce32-46ea-9de1-5859e803ff4e",
+      "name": "Architecture - PD-02 v1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Frontend request contract\nUpload: `multipart/form-data` with `batch_id` + one or more PDFs to POST `pd02/intake`.\nPoll: GET `pd02/batch-status?batch_id=` every 2.5s (status: processing -> complete).\nData: GET `pd02/units?batch_id=` -> {units, review_queue, stats}.\nReport: GET `pd02/report?batch_id=` -> text/html (render in an iframe).\nDo not rename the paths unless the frontend config.js is updated too.",
+        "width": 420,
+        "height": 190,
+        "color": 2
+      },
+      "id": "0ece7ebe-3199-47de-85a5-a9e82a143432",
+      "name": "Frontend Contract",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        520,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## unit_records Data Table\nCreate the table once (n8n Data Tables, name: `unit_records`) and select it in `Save to unit_records Table`. Rows = one per unit (current state). REA-02 reads the same table. continueOnFail is ON — a missing table must never break the demo report.",
+        "width": 380,
+        "height": 160,
+        "color": 5
+      },
+      "id": "3f9a6cf1-90fb-4096-b0fa-779fc0aef775",
+      "name": "Data Table Config Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3060,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Demo storage only\nBatches live in workflow static data (24h / 50 batches GC). Use the PRODUCTION webhook URLs when demoing (activate the workflow first). Production hardening: auth + access gateway, real DB instead of static data, object storage for originals, CORS restricted to the Pages origin.",
+        "width": 420,
+        "height": 170,
+        "color": 4
+      },
+      "id": "50e48ace-f343-4596-abea-04c2b631097a",
+      "name": "Demo Storage Warning",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "76c357f7-8f10-4069-a270-8dd926315ef9",
+      "name": "Schedule Trigger (hourly)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1400,
+        -980
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pd02/check",
+        "responseMode": "onReceived",
+        "options": {
+          "responseCode": 202,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      },
+      "id": "248ee283-c4ee-4189-bee8-0e4c06306e12",
+      "name": "POST pd02/check",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1400,
+        -860
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Triggered hourly (schedule) or manually (POST /pd02/check).\n// output 0: one item -> refresh the 521-project developments list\n// output 1: one item per watched development\nconst sd = $getWorkflowStaticData('global');\nsd.pd02_v2 = sd.pd02_v2 || { watchlist: {}, developments: [], inventory: {}, file_meta: {}, check_log: [] };\nconst watchlist = Object.values(sd.pd02_v2.watchlist || {});\nconst nowIso = new Date().toISOString();\nif (!watchlist.length) {\n  sd.pd02_v2.last_check = { at: nowIso, devs_checked: 0, new_docs: 0, note: 'watchlist is empty' };\n}\nconst devItems = watchlist.map(d => ({ json: {\n  dev_id: d.dev_id, name_en: d.name_en || '', name_zh: d.name_zh || '',\n  phase_en: d.phase_en || '', phase_zh: d.phase_zh || '',\n} }));\nreturn [\n  [{ json: { task: 'refresh_developments', at: nowIso } }],\n  devItems,\n];"
+      },
+      "id": "ea5740d2-eed0-4513-93b3-3b6745efd641",
+      "name": "Run SRPE Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1200,
+        -920
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.srpe.gov.hk/api/SrpeWebService/DevBldgSearch/getDevBldgSearchResult",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "PLACEHOLDER",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "ab96def7-b074-4168-a4ec-eba686f48a64",
+      "name": "Fetch Developments List",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1000,
+        -1080
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nconst list = (resp.resultData && resp.resultData.list) || [];\nconst trimmed = list.filter(d => d && d.id).map(d => ({\n  dev_id: String(d.id),\n  name_en: d.engName || '',\n  name_zh: d.chnName || '',\n  phase_en: d.engPhaseName || '',\n  phase_zh: d.chnPhaseName || '',\n  district_en: d.engDistrict || '',\n  district_zh: d.chnDistrict || '',\n  address_en: ((d.addresses || [])[0] || {}).engAddress || '',\n  address_zh: ((d.addresses || [])[0] || {}).chnAddress || '',\n  active: d.active === 'Y',\n}));\nconst sd = $getWorkflowStaticData('global');\nsd.pd02_v2.developments = trimmed;\nsd.pd02_v2.developments_refreshed_at = new Date().toISOString();\nreturn [{ json: { stored: trimmed.length } }];"
+      },
+      "id": "5638c5d2-bf76-4030-957a-bc87a1cd84dc",
+      "name": "Store Developments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -800,
+        -1080
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.srpe.gov.hk/api/SrpeWebService/DevBldgSearch/getSelectedDevResult",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"language\":\"en\",\"devId\":\"{{ $json.dev_id }}\"}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "c5152a32-0f69-4ef6-ae3f-eee95097dfdf",
+      "name": "Fetch Development Info",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1000,
+        -760
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// \"Run Once for All Items\": every watched development's payload arrives here.\n// Compares each dev's document list against the stored inventory; emits one item\n// per NEW price list / sales arrangement / register (brochures are recorded but\n// not extracted — the frontend views them directly from SRPE).\nconst items = $input.all().map(i => i.json);\nconst sd = $getWorkflowStaticData('global');\nsd.pd02_v2 = sd.pd02_v2 || {};\nsd.pd02_v2.inventory = sd.pd02_v2.inventory || {};\nsd.pd02_v2.check_log = sd.pd02_v2.check_log || [];\nconst newDocs = [];\nlet devsChecked = 0;\nfor (const it of items) {\n  const devId = String(it.dev_id || '');\n  if (!devId) continue;\n  const devInfo = (it.resultData && it.resultData.devInfoResp) || {};\n  const inv = sd.pd02_v2.inventory[devId] = sd.pd02_v2.inventory[devId] || { docs: {}, is_new: {} };\n  inv.last_checked_at = new Date().toISOString();\n  const brochure = devInfo.brochure;\n  const collections = {\n    price_list: devInfo.prices || [],\n    sales_arrangement: devInfo.salesArrangements || [],\n    transaction_register: devInfo.transactions || [],\n    brochure: brochure ? (brochure.partFiles || [brochure]) : [],\n  };\n  for (const [type, docs] of Object.entries(collections)) {\n    inv.docs[type] = inv.docs[type] || [];\n    inv.is_new[type] = [];\n    for (const d of docs) {\n      if (!d || !d.id) continue;\n      const rec = {\n        id: String(d.id),\n        seq: d.seq != null ? String(d.seq) : '',\n        fileName: (d.file && d.file.fileName) || d.fileName || '',\n        fileSize: (d.file && d.file.fileSize) || d.fileSize || null,\n        submissionTime: (d.file && d.file.submissionTime) || d.updateDateTime || d.dateOfPrinting || d.updateDate || null,\n        serialNo: d.serialNo || null,\n      };\n      const known = inv.docs[type].some(x => x.id === rec.id);\n      if (!known) {\n        inv.docs[type].push(rec);\n        inv.is_new[type].push(rec.id);\n        if (type !== 'brochure') {\n          newDocs.push({\n            json: {\n              dev_id: devId, name_en: it.name_en || '', name_zh: it.name_zh || '',\n              doc_type: type, doc_id: rec.id, seq: rec.seq,\n              file_name: rec.fileName, submission_time: rec.submissionTime,\n            },\n          });\n        }\n      }\n    }\n  }\n  devsChecked++;\n}\nconst nowIso = new Date().toISOString();\nsd.pd02_v2.last_check = { at: nowIso, devs_checked: devsChecked, new_docs: newDocs.length };\nsd.pd02_v2.check_log.unshift({\n  at: nowIso, devs_checked: devsChecked, new_docs: newDocs.length,\n  new_files: newDocs.map(x => x.json.file_name),\n});\nsd.pd02_v2.check_log = sd.pd02_v2.check_log.slice(0, 50);\n// Download queue consumed by \"Initialise Monitor Batch\" (HTTP drops input metadata).\nsd.pd02_v2.pending_downloads = newDocs.map(x => x.json);\nreturn newDocs.length ? [newDocs, [{ json: { no_changes: true, checked_devs: devsChecked } }]]\n                     : [[], [{ json: { no_changes: true, checked_devs: devsChecked } }]];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "1dfd6ea7-9e4e-4c18-a0f7-d1a02ff241be",
+      "name": "Diff & Detect New Documents",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -800,
+        -760
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Nothing new since the last check — zero LLM cost this cycle.\nreturn $input.all();"
+      },
+      "id": "0efb72cd-b971-4ec8-982a-f210112a3efb",
+      "name": "No Changes (skip)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -600,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://www.srpe.gov.hk/api/SrpeWebService/download/download{{ $json.doc_type === 'price_list' ? 'Price' : $json.doc_type === 'sales_arrangement' ? 'SalesArrangement' : 'Trx' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"language\":\"en\",\"id\":\"{{ $json.doc_id }}\",\"seq\":\"{{ $json.seq }}\",\"devId\":\"{{ $json.dev_id }}\"}",
+        "options": {
+          "timeout": 180000
+        },
+        "responseFormat": "file"
+      },
+      "id": "fcee7991-6e9a-47a1-9acd-cfa9c1827a92",
+      "name": "Download New Documents",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -600,
+        -760
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// \"Run Once for All Items\": merge the downloaded binaries into one item and\n// create the monitor batch (same storage contract as the intake batch).\nconst items = $input.all();\nconst sd = $getWorkflowStaticData('global');\nconst pending = (sd.pd02_v2 && sd.pd02_v2.pending_downloads) || [];\nif (!items.length) throw new Error('No documents downloaded.');\nif (items.length !== pending.length) throw new Error('Download count mismatch: ' + items.length + ' vs pending ' + pending.length);\nconst binaries = {};\nconst fileMeta = {};\nconst devs = new Set();\nitems.forEach((it, i) => {\n  const meta = pending[i] || {};\n  const b = it.binary && it.binary.data;\n  if (!b) throw new Error('Missing binary for ' + meta.file_name);\n  const key = 'file' + (i + 1);\n  binaries[key] = b;\n  const fn = meta.file_name || key;\n  fileMeta[fn] = {\n    dev_id: meta.dev_id,\n    development: meta.dev_id,\n    development_name: (meta.name_en ? meta.name_en + (meta.name_zh ? ' ' + meta.name_zh : '') : fn),\n  };\n  if (meta.dev_id) devs.add(meta.dev_id);\n});\nsd.pd02_v2.pending_downloads = [];\nsd.pd02_v2.file_meta = sd.pd02_v2.file_meta || {};\n// GC file_meta: keep the 20 most recent batches.\nconst metaKeys = Object.keys(sd.pd02_v2.file_meta);\nif (metaKeys.length > 20) {\n  for (const k of metaKeys.slice(0, metaKeys.length - 20)) delete sd.pd02_v2.file_meta[k];\n}\nconst batchId = 'pd02-m-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);\nconst now = new Date();\nsd.pd02_v1 = sd.pd02_v1 || { batches: {} };\nfor (const [id, batch] of Object.entries(sd.pd02_v1.batches)) {\n  const created = Date.parse(batch.created_at || 0);\n  if (!Number.isFinite(created) || now.getTime() - created > 24 * 60 * 60 * 1000) delete sd.pd02_v1.batches[id];\n}\nsd.pd02_v1.batches[batchId] = {\n  batch_id: batchId,\n  status: 'processing',\n  created_at: now.toISOString(),\n  updated_at: now.toISOString(),\n  total_files: items.length,\n  processed_files: 0,\n  records: [],\n  units: [],\n  review_queue: [],\n  stats: null,\n  weekly_report_html: null,\n  origin: 'monitor',\n  source_devs: Array.from(devs),\n};\nsd.pd02_v2.file_meta[batchId] = fileMeta;\nif (sd.pd02_v2.last_check) sd.pd02_v2.last_check.batch_id = batchId;\nreturn [{ json: { batch_id: batchId, total_files: items.length }, binary: binaries }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "c58f3460-42e3-4cc3-bb01-b9c75986f026",
+      "name": "Initialise Monitor Batch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        -760
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// After a monitor batch completes: clear NEW flags for processed files and log it.\nconst data = $input.first().json;\nconst sd = $getWorkflowStaticData('global');\nconst batchId = String(data.batch_id || '');\nconst batch = sd.pd02_v1 && sd.pd02_v1.batches[batchId];\nif (!batch || batch.origin !== 'monitor') {\n  return [{ json: { batch_id: batchId, status: data.status, skipped: true } }];\n}\nconst meta = (sd.pd02_v2 && sd.pd02_v2.file_meta && sd.pd02_v2.file_meta[batchId]) || {};\nconst processedFiles = Object.keys(meta);\nif (sd.pd02_v2 && sd.pd02_v2.inventory) {\n  for (const inv of Object.values(sd.pd02_v2.inventory)) {\n    for (const type of Object.keys(inv.is_new || {})) {\n      inv.is_new[type] = (inv.is_new[type] || []).filter(id => {\n        const doc = (inv.docs[type] || []).find(x => x.id === id);\n        return doc && !processedFiles.includes(doc.fileName);\n      });\n    }\n  }\n}\nif (sd.pd02_v2 && sd.pd02_v2.last_check) sd.pd02_v2.last_check.completed_at = new Date().toISOString();\nif (sd.pd02_v2 && sd.pd02_v2.check_log && sd.pd02_v2.check_log.length) {\n  const last = sd.pd02_v2.check_log[0];\n  if (!last.completed_at) {\n    last.completed_at = new Date().toISOString();\n    last.batch_id = batchId;\n    last.processed_files = processedFiles.length;\n  }\n}\nreturn [{ json: { batch_id: batchId, status: data.status, processed_files: processedFiles.length } }];"
+      },
+      "id": "ff46d874-34c4-472d-990b-2facbff71ec6",
+      "name": "Update Monitor State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        340,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "pd02/watchlist",
+        "responseMode": "responseNode"
+      },
+      "id": "7198a80e-9821-4d11-9a94-62b9df19be50",
+      "name": "GET pd02/watchlist",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1400,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pd02/watchlist",
+        "responseMode": "responseNode"
+      },
+      "id": "823fb29c-ca0d-489f-988a-4dcaef42acbd",
+      "name": "POST pd02/watchlist",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1400,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// GET -> current watchlist. POST {action:'add'|'remove', dev_id, ...} -> mutate.\nconst sd = $getWorkflowStaticData('global');\nsd.pd02_v2 = sd.pd02_v2 || {};\nsd.pd02_v2.watchlist = sd.pd02_v2.watchlist || {};\nconst body = $json.body || {};\nconst action = String(body.action || '').toLowerCase();\nif (action === 'add' && body.dev_id) {\n  sd.pd02_v2.watchlist[String(body.dev_id)] = {\n    dev_id: String(body.dev_id),\n    name_en: body.name_en || '', name_zh: body.name_zh || '',\n    phase_en: body.phase_en || '', phase_zh: body.phase_zh || '',\n    district_en: body.district_en || '', district_zh: body.district_zh || '',\n    address_en: body.address_en || '', address_zh: body.address_zh || '',\n    added_at: new Date().toISOString(),\n  };\n} else if (action === 'remove' && body.dev_id) {\n  delete sd.pd02_v2.watchlist[String(body.dev_id)];\n}\nreturn [{ json: { ok: true, watchlist: Object.values(sd.pd02_v2.watchlist), _status: 200 } }];"
+      },
+      "id": "fa42aabf-4961-4e64-a372-868262e9afb9",
+      "name": "Manage Watchlist",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1200,
+        -360
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": "={{ $json._status || 200 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "id": "9b2a80e7-7584-4fad-b57d-37958ca7cc53",
+      "name": "Respond Watchlist",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -1000,
+        -360
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "pd02/developments",
+        "responseMode": "responseNode"
+      },
+      "id": "64ab1453-1ef5-4156-bee6-e81f79c0a073",
+      "name": "GET pd02/developments",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1400,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const sd = $getWorkflowStaticData('global');\nconst devs = (sd.pd02_v2 && sd.pd02_v2.developments) || [];\nreturn [{ json: {\n  ok: true,\n  count: devs.length,\n  refreshed_at: (sd.pd02_v2 && sd.pd02_v2.developments_refreshed_at) || null,\n  developments: devs,\n  _status: 200,\n} }];"
+      },
+      "id": "4d89b793-4e20-42ea-a8b0-024951ac7aac",
+      "name": "Read Developments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1200,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": "={{ $json._status || 200 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "id": "8f9aa0bb-5e0e-4655-adbd-f4e927b25246",
+      "name": "Respond Developments",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -1000,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "pd02/snapshot",
+        "responseMode": "responseNode"
+      },
+      "id": "96b4966c-76b9-42e0-a508-33362fb0c118",
+      "name": "GET pd02/snapshot",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1400,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const sd = $getWorkflowStaticData('global');\nconst v2 = sd.pd02_v2 || {};\nconst watchlist = Object.values(v2.watchlist || {});\nconst inventory = [];\nfor (const [devId, inv] of Object.entries(v2.inventory || {})) {\n  const wl = (v2.watchlist || {})[devId];\n  inventory.push({\n    dev_id: devId,\n    name_en: (wl && wl.name_en) || '',\n    name_zh: (wl && wl.name_zh) || '',\n    last_checked_at: inv.last_checked_at || null,\n    docs: inv.docs || {},\n    is_new: inv.is_new || {},\n  });\n}\nlet latest_batch = null;\nconst lastBatchId = v2.last_check && v2.last_check.batch_id;\nif (lastBatchId && sd.pd02_v1 && sd.pd02_v1.batches[lastBatchId]) {\n  const b = sd.pd02_v1.batches[lastBatchId];\n  latest_batch = {\n    batch_id: b.batch_id,\n    status: b.status,\n    total_files: b.total_files,\n    processed_files: b.processed_files,\n    unit_count: (b.units || []).length,\n    review_count: (b.review_queue || []).length,\n    stats: b.stats || null,\n    created_at: b.created_at,\n    origin: b.origin || 'intake',\n  };\n}\nreturn [{ json: {\n  ok: true,\n  watchlist,\n  inventory,\n  developments: {\n    count: (v2.developments || []).length,\n    refreshed_at: v2.developments_refreshed_at || null,\n  },\n  last_check: v2.last_check || null,\n  check_log: (v2.check_log || []).slice(0, 20),\n  latest_batch,\n  _status: 200,\n} }];"
+      },
+      "id": "1509e75f-089e-481d-9753-5da64864bc1c",
+      "name": "Read Snapshot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1200,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": "={{ $json._status || 200 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "id": "fcaddce0-6d24-4bd0-bdfc-a8e99108565c",
+      "name": "Respond Snapshot",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -1000,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Real SRPE price lists hold hundreds of rows; one LLM call cannot reliably\n// emit them all. Split into ~15k-char chunks (with overlap) for per-chunk extraction.\nconst item = $input.first().json;\nconst text = String(item.text || '');\nconst CHUNK = 15000;\nconst OVERLAP = 1000;\nif (!text.trim()) return [{ json: { ...item, chunk_index: 0, chunk_total: 1, text } }];\nif (text.length <= CHUNK) return [{ json: { ...item, chunk_index: 0, chunk_total: 1, text } }];\nconst chunks = [];\nlet i = 0;\nwhile (i < text.length) {\n  let end = Math.min(i + CHUNK, text.length);\n  if (end < text.length) {\n    const nl = text.lastIndexOf('\\n', end);\n    if (nl > i + CHUNK * 0.7) end = nl;\n  }\n  chunks.push(text.slice(i, end));\n  if (end === text.length) break;   // tail done — avoid degenerate 1-char steps\n  i = Math.max(end - OVERLAP, i + 1);\n}\nreturn chunks.map((c, k) => ({ json: { ...item, chunk_index: k, chunk_total: chunks.length, text: c } }));"
+      },
+      "id": "163b02ce-aa57-441a-83b5-82519521bbb9",
+      "name": "Chunk Price List Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// \"Run Once for All Items\": merge per-chunk extractions into one price-list record.\nconst items = $input.all().map(i => i.json);\nconst merged = {\n  document_type: 'price_list',\n  development: null, development_name: null,\n  price_list_no: null, price_list_date: null, currency: null, payment_plan: null,\n  units: [],\n};\nconst seen = new Set();\nfor (const it of items) {\n  const ex = it.output || it;\n  for (const k of ['development', 'development_name', 'price_list_no', 'price_list_date', 'currency', 'payment_plan']) {\n    if (merged[k] == null && ex[k] != null) merged[k] = ex[k];\n  }\n  for (const u of (ex.units || [])) {\n    if (!u || !u.unit_key) continue;\n    if (seen.has(u.unit_key)) continue;   // overlapping chunks may duplicate a row\n    seen.add(u.unit_key);\n    merged.units.push(u);\n  }\n}\nreturn [{ json: { output: merged, file_input: items[0] && items[0].file_input } }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "279907ad-682e-4a77-b857-2aeaefbbcaf1",
+      "name": "Merge Price List Chunks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        620
+      ]
+    }
+  ],
+  "connections": {
+    "POST pd02/intake": {
+      "main": [
+        [
+          {
+            "node": "Initialise Web Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Initialise Web Batch": {
+      "main": [
+        [
+          {
+            "node": "Split Uploaded Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Uploaded Files": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Files": {
+      "main": [
+        [
+          {
+            "node": "File Type Router",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reconcile Unit Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "File Type Router": {
+      "main": [
+        [
+          {
+            "node": "Read PDF",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pass Unreadable to Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read PDF": {
+      "main": [
+        [
+          {
+            "node": "Normalise PDF Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise PDF Text": {
+      "main": [
+        [
+          {
+            "node": "Text Quality Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text Quality Gate": {
+      "main": [
+        [
+          {
+            "node": "Classify Document",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pass Unreadable to Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Document": {
+      "main": [
+        [
+          {
+            "node": "Chunk Price List Text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Sales Arrangement",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Transaction Register",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Price List": {
+      "main": [
+        [
+          {
+            "node": "Merge Price List Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Sales Arrangement": {
+      "main": [
+        [
+          {
+            "node": "Match & Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Transaction Register": {
+      "main": [
+        [
+          {
+            "node": "Match & Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass Unreadable to Review": {
+      "main": [
+        [
+          {
+            "node": "Match & Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match & Validate": {
+      "main": [
+        [
+          {
+            "node": "Persist Processed File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist Processed File": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reconcile Unit Records": {
+      "main": [
+        [
+          {
+            "node": "Split Units for Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Units for Table": {
+      "main": [
+        [
+          {
+            "node": "Save to unit_records Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to unit_records Table": {
+      "main": [
+        [
+          {
+            "node": "Build Weekly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Weekly Report": {
+      "main": [
+        [
+          {
+            "node": "Mark Batch Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Chat Model - Classify & Extract": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Classify Document",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Price List",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Sales Arrangement",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Transaction Register",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET pd02/batch-status": {
+      "main": [
+        [
+          {
+            "node": "Read Batch Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Batch Status": {
+      "main": [
+        [
+          {
+            "node": "Respond Batch Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET pd02/units": {
+      "main": [
+        [
+          {
+            "node": "Read Unit Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Unit Records": {
+      "main": [
+        [
+          {
+            "node": "Respond Unit Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET pd02/report": {
+      "main": [
+        [
+          {
+            "node": "Read Weekly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Weekly Report": {
+      "main": [
+        [
+          {
+            "node": "Respond Weekly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger (hourly)": {
+      "main": [
+        [
+          {
+            "node": "Run SRPE Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST pd02/check": {
+      "main": [
+        [
+          {
+            "node": "Run SRPE Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run SRPE Check": {
+      "main": [
+        [
+          {
+            "node": "Fetch Developments List",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fetch Development Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Developments List": {
+      "main": [
+        [
+          {
+            "node": "Store Developments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Development Info": {
+      "main": [
+        [
+          {
+            "node": "Diff & Detect New Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Diff & Detect New Documents": {
+      "main": [
+        [
+          {
+            "node": "Download New Documents",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Changes (skip)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download New Documents": {
+      "main": [
+        [
+          {
+            "node": "Initialise Monitor Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Initialise Monitor Batch": {
+      "main": [
+        [
+          {
+            "node": "Split Uploaded Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Batch Complete": {
+      "main": [
+        [
+          {
+            "node": "Update Monitor State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET pd02/watchlist": {
+      "main": [
+        [
+          {
+            "node": "Manage Watchlist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST pd02/watchlist": {
+      "main": [
+        [
+          {
+            "node": "Manage Watchlist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manage Watchlist": {
+      "main": [
+        [
+          {
+            "node": "Respond Watchlist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET pd02/developments": {
+      "main": [
+        [
+          {
+            "node": "Read Developments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Developments": {
+      "main": [
+        [
+          {
+            "node": "Respond Developments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET pd02/snapshot": {
+      "main": [
+        [
+          {
+            "node": "Read Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Snapshot": {
+      "main": [
+        [
+          {
+            "node": "Respond Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chunk Price List Text": {
+      "main": [
+        [
+          {
+            "node": "Extract Price List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Price List Chunks": {
+      "main": [
+        [
+          {
+            "node": "Match & Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
